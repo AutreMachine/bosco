@@ -23,6 +23,7 @@ class ModelConfig:
 
     @property
     def upstream_name(self) -> str:
+        """Returns the backend model name, falling back to the public name."""
         return self.backend_name or self.name
 
 
@@ -38,6 +39,7 @@ class MachineConfig:
     models: list[ModelConfig] = field(default_factory=list)
 
     def to_dict(self) -> dict:
+        """Serializes the machine config to a plain dict, omitting None values."""
         d = asdict(self)
         d["models"] = [{k: v for k, v in m.items() if v is not None} for m in d["models"]]
         return {k: v for k, v in d.items() if v is not None}
@@ -73,6 +75,7 @@ class ServerConfig:
     machines_file: Optional[str] = "/data/machines.yaml"  # pool modified from the console (takes precedence at startup)
 
     def parsed_keys(self) -> list[ApiKey]:
+        """Parses api_keys config and the LLM_ROUTER_API_KEYS env var into validated ApiKey objects."""
         keys: list[ApiKey] = []
         for i, k in enumerate(self.api_keys or []):
             if isinstance(k, dict):
@@ -110,7 +113,7 @@ class Config:
     path: Optional[Path] = None
 
     def resolve(self, p: Optional[str]) -> Optional[Path]:
-        """Path relative to the configuration file's directory."""
+        """Resolves a path relative to the config file's directory; returns None for empty input."""
         if not p:
             return None
         pp = Path(p)
@@ -120,6 +123,7 @@ class Config:
 
 
 def model_from_dict(raw: dict | str) -> ModelConfig:
+    """Parses and validates a raw dict or model-name string into a ModelConfig."""
     if isinstance(raw, str):
         raw = {"name": raw}
     raw = {k: v for k, v in raw.items() if v not in (None, "")}
@@ -136,6 +140,7 @@ def model_from_dict(raw: dict | str) -> ModelConfig:
 
 
 def machine_from_dict(raw: dict) -> MachineConfig:
+    """Parses and validates a raw dict into a MachineConfig, raising ValueError on bad input."""
     raw = dict(raw)
     models_raw = raw.pop("models", None) or []
     raw.pop("has_api_key", None)
@@ -173,6 +178,7 @@ def check_model_types(machines: list[MachineConfig]) -> None:
 
 
 def parse_machines(raw_list: list) -> list[MachineConfig]:
+    """Parses a list of raw dicts into validated MachineConfig objects, rejecting duplicates."""
     machines = [machine_from_dict(r) for r in raw_list or []]
     names = [m.name for m in machines]
     dup = {n for n in names if names.count(n) > 1}
@@ -183,6 +189,7 @@ def parse_machines(raw_list: list) -> list[MachineConfig]:
 
 
 def load_config(path: str | Path) -> Config:
+    """Loads and validates a YAML config file, merging the machines file if present."""
     path = Path(path).resolve()
     
     if not path.exists():

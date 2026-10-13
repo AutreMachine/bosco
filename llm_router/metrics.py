@@ -64,11 +64,13 @@ class RequestRecord:
 
 
 def _r(x: Optional[float], n: int = 2) -> Optional[float]:
+    """Rounds a float to n decimal places, returning None if the value is None."""
     return None if x is None else round(x, n)
 
 
 class MetricsStore:
     def __init__(self, db_path: str, jsonl_path: Optional[str] = None):
+        """Opens or creates the SQLite database and optional JSONL log file."""
         self._lock = threading.Lock()
         self._db = sqlite3.connect(db_path, check_same_thread=False)
         self._db.executescript(SCHEMA)
@@ -82,6 +84,7 @@ class MetricsStore:
         self._jsonl = open(jsonl_path, "a", encoding="utf-8") if jsonl_path else None
 
     def _write(self, rec: RequestRecord) -> None:
+        """Inserts a request record into SQLite and appends it to the JSONL file."""
         row = asdict(rec)
         with self._lock:
             cols = ",".join(row)
@@ -93,6 +96,7 @@ class MetricsStore:
                 self._jsonl.flush()
 
     async def record(self, rec: RequestRecord) -> None:
+        """Rounds numeric fields, logs the request, and writes it to storage asynchronously."""
         rec.ts = rec.ts or time.time()
         for f in ("queue_wait_ms", "ttft_ms", "total_ms", "prefill_tps", "gen_tps"):
             setattr(rec, f, _r(getattr(rec, f)))
@@ -112,6 +116,7 @@ class MetricsStore:
             log.exception("Failed to write metrics")
 
     def _stats(self, since: float, model: Optional[str], machine: Optional[str]) -> list[dict]:
+        """Returns aggregated per-machine/model performance stats for a time window."""
         where, args = ["ts >= ?"], [since]
         if model:
             where.append("model = ?"); args.append(model)
@@ -139,12 +144,14 @@ class MetricsStore:
             return [dict(zip(cols, row)) for row in cur.fetchall()]
 
     def _recent(self, limit: int) -> list[dict]:
+        """Returns the most recent request rows, ordered newest first."""
         with self._lock:
             cur = self._db.execute("SELECT * FROM requests ORDER BY id DESC LIMIT ?", (limit,))
             cols = [c[0] for c in cur.description]
             return [dict(zip(cols, row)) for row in cur.fetchall()]
 
     def _query(self, limit: int, offset: int, filters: dict) -> dict:
+        """Queries requests with optional column filters; returns rows, total count, and facets."""
         where, args = [], []
         for col in ("model", "machine", "priority", "client", "endpoint"):
             if filters.get(col):
@@ -171,6 +178,7 @@ class MetricsStore:
         return {"total": total, "rows": rows, "facets": facets}
 
     def _overview(self, since: float) -> dict:
+        """Returns aggregate KPIs (request count, errors, queue wait, throughput) since the given timestamp."""
         with self._lock:
             r = self._db.execute("""
                 SELECT COUNT(*), SUM(status >= 400), AVG(queue_wait_ms), AVG(gen_tps), AVG(prefill_tps),
@@ -181,18 +189,23 @@ class MetricsStore:
         return {k: (round(v, 1) if isinstance(v, float) else (v or 0)) for k, v in zip(keys, r)}
 
     async def query(self, limit: int = 50, offset: int = 0, **filters) -> dict:
+        """Async wrapper for _query."""
         return await asyncio.to_thread(self._query, limit, offset, filters)
 
     async def overview(self, hours: float = 1) -> dict:
+        """Async wrapper for _overview, defaulting to the last hour."""
         return await asyncio.to_thread(self._overview, time.time() - hours * 3600)
 
     async def stats(self, hours: float = 24, model: Optional[str] = None, machine: Optional[str] = None):
+        """Async wrapper for _stats."""
         return await asyncio.to_thread(self._stats, time.time() - hours * 3600, model, machine)
 
     async def recent(self, limit: int = 50):
+        """Async wrapper for _recent."""
         return await asyncio.to_thread(self._recent, limit)
 
     def close(self) -> None:
+        """Closes the SQLite connection and JSONL file."""
         with self._lock:
             self._db.close()
             if self._jsonl:

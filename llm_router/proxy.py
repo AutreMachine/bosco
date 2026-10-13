@@ -28,6 +28,7 @@ class PerfMeter:
     """
 
     def __init__(self) -> None:
+        """Initializes timing state and token counters."""
         self.t_start = time.perf_counter()
         self.t_first: Optional[float] = None
         self.t_last: Optional[float] = None
@@ -38,6 +39,7 @@ class PerfMeter:
         self.timings: Optional[dict] = None
 
     def feed(self, obj: dict) -> None:
+        """Records a streaming chunk, updating timing state and token count."""
         now = time.perf_counter()
         if chunk_has_tokens(obj):
             if self.t_first is None:
@@ -47,6 +49,7 @@ class PerfMeter:
         self.read_usage(obj)
 
     def read_usage(self, obj: dict) -> None:
+        """Extracts token counts and backend timings from a response object."""
         usage = obj.get("usage")
         if isinstance(usage, dict):
             self.prompt_tokens = usage.get("prompt_tokens", self.prompt_tokens)
@@ -55,6 +58,7 @@ class PerfMeter:
             self.timings = obj["timings"]
 
     def finish(self) -> dict[str, Any]:
+        """Computes and returns the final performance metrics dict."""
         self.t_end = time.perf_counter()
         total = self.t_end - self.t_start
         out: dict[str, Any] = {
@@ -111,6 +115,7 @@ class StreamAggregator:
     """Reassembles a non-streaming response (chat.completion / text_completion) from chunks."""
 
     def __init__(self, kind: str) -> None:
+        """Initializes the aggregator for the given response kind ('chat' or 'completion')."""
         self.kind = kind  # "chat" | "completion"
         self.base: dict = {}
         self.choices: dict[int, dict] = {}
@@ -118,6 +123,7 @@ class StreamAggregator:
         self.timings: Optional[dict] = None
 
     def feed(self, obj: dict) -> None:
+        """Accumulates one SSE chunk into the in-progress response."""
         if not self.base:
             self.base = {k: obj[k] for k in ("id", "created", "model", "system_fingerprint") if k in obj}
         if obj.get("usage"):
@@ -156,6 +162,7 @@ class StreamAggregator:
                     t["function"]["arguments"] += fn["arguments"]
 
     def result(self) -> dict:
+        """Returns the fully assembled non-streaming response object."""
         choices = []
         for idx in sorted(self.choices):
             acc = self.choices[idx]

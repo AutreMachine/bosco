@@ -13,23 +13,28 @@ from fastapi.responses import JSONResponse, StreamingResponse
 
 
 def build(models: list[str], prefill_tps: float, gen_tps: float, name: str, timings: bool) -> FastAPI:
+    """Creates a FastAPI app that simulates an OpenAI-compatible backend at fixed throughput."""
     app = FastAPI()
     started: list[str] = []
 
     def prompt_tokens(body) -> int:
+        """Estimates token count from a request body using a 4-char-per-token heuristic."""
         text = json.dumps(body.get("messages") or body.get("prompt") or body.get("input"))
         return max(1, len(text) // 4)
 
     @app.get("/v1/models")
     async def list_models():
+        """Returns the list of models served by this fake backend."""
         return {"object": "list", "data": [{"id": m, "object": "model"} for m in models]}
 
     @app.get("/log")
     async def get_log():
+        """Returns all request tags received since startup."""
         return {"started": started}
 
     @app.post("/v1/embeddings")
     async def emb(request: Request):
+        """Handles embedding requests with simulated prefill latency."""
         body = await request.json()
         inputs = body["input"] if isinstance(body["input"], list) else [body["input"]]
         n = prompt_tokens(body)
@@ -41,6 +46,7 @@ def build(models: list[str], prefill_tps: float, gen_tps: float, name: str, timi
     @app.post("/v1/chat/completions")
     @app.post("/v1/completions")
     async def chat(request: Request):
+        """Handles chat and completion requests with simulated prefill and generation latency."""
         body = await request.json()
         if body["model"] not in models:
             return JSONResponse(status_code=404, content={"error": {"message": f"model {body['model']} not found"}})
@@ -57,6 +63,7 @@ def build(models: list[str], prefill_tps: float, gen_tps: float, name: str, timi
         cid, created = f"cmpl-{name}-{len(started)}", int(time.time())
 
         def chunk(text=None, finish=None, role=False):
+            """Builds a streaming SSE chunk object for chat or completion mode."""
             if chat_mode:
                 delta = {}
                 if role:
@@ -76,6 +83,7 @@ def build(models: list[str], prefill_tps: float, gen_tps: float, name: str, timi
 
         if body.get("stream"):
             async def gen():
+                """Yields SSE data lines at simulated prefill then generation speed."""
                 await asyncio.sleep(n_prompt / prefill_tps)
                 for i, w in enumerate(words):
                     if i:

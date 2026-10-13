@@ -26,6 +26,7 @@ PUBLIC_PATHS = {"/health"}
 
 
 def oai_error(status: int, message: str, type_: str, code: Optional[str] = None, headers=None) -> JSONResponse:
+    """Returns a JSONResponse with an OpenAI-compatible error envelope."""
     return JSONResponse(status_code=status, headers=headers,
                         content={"error": {"message": message, "type": type_, "param": None, "code": code}})
 
@@ -41,11 +42,13 @@ class ApiKeyMiddleware:
     """
 
     def __init__(self, inner, core: RouterCore):
+        """Stores the inner ASGI app, the router core, and the per-IP failure tracker."""
         self.inner = inner
         self.core = core
         self.failures: dict[str, list[float]] = {}
 
     def _match(self, token: str) -> Optional[str]:
+        """Returns the key name for a valid token, or None if no match (constant-time compare)."""
         found = None
         for k in self.core.api_keys:  # constant-time comparison, no early exit
             if hmac.compare_digest(token.encode(), k.key.encode()):
@@ -53,12 +56,14 @@ class ApiKeyMiddleware:
         return found
 
     def _throttled(self, ip: str) -> bool:
+        """Returns True if the IP has exceeded 20 failed auth attempts in the last minute."""
         now = time.monotonic()
         hits = [t for t in self.failures.get(ip, []) if now - t < 60]
         self.failures[ip] = hits
         return len(hits) >= 20  # 20 failures / minute / IP
 
     async def __call__(self, scope, receive, send):
+        """Validates the API key; short-circuits with 401 or 429 if the key is missing/invalid."""
         if scope["type"] != "http" or scope["path"] in PUBLIC_PATHS or not self.core.api_keys:
             scope.setdefault("state", {})["client_name"] = None
             return await self.inner(scope, receive, send)
@@ -83,12 +88,14 @@ class Ctx:
     """Context for a proxied request."""
 
     def __init__(self, rec: RequestRecord, ar: ActiveRequest, public: str):
+        """Stores the request record, active-request tracker, public model name, lease, and headers."""
         self.rec, self.ar, self.public = rec, ar, public
         self.lease: Optional[Lease] = None
         self.headers: dict = {}
 
 
 def create_api_app(core: RouterCore) -> FastAPI:
+    """Creates and configures the public OpenAI-compatible FastAPI application."""
     srv = core.config.server
     sched, metrics, http = core.scheduler, core.metrics, core.http
 
@@ -103,12 +110,14 @@ def create_api_app(core: RouterCore) -> FastAPI:
         await metrics.record(ctx.rec)
 
     def backend_headers(m: Machine) -> dict:
+        """Builds request headers for the upstream machine, including auth if configured."""
         h = {"Content-Type": "application/json"}
         if m.cfg.api_key:
             h["Authorization"] = f"Bearer {m.cfg.api_key}"
         return h
 
     async def open_upstream(lease: Lease, path: str, body: dict, stream: bool) -> httpx.Response:
+        """Sends a POST to the upstream machine, raising BackendUnreachable on connect failure."""
         m = lease.machine
         req = http.build_request("POST", f"{m.cfg.url}/{path}", json=body, headers=backend_headers(m))
         try:
@@ -117,16 +126,19 @@ def create_api_app(core: RouterCore) -> FastAPI:
             raise BackendUnreachable(f"{type(e).__name__}: {e}") from e
 
     def rewrite_model(obj: dict, public: str) -> dict:
+        """Replaces the 'model' field in a response dict with the public-facing model name."""
         if isinstance(obj, dict) and "model" in obj:
             obj["model"] = public
         return obj
 
     def new_meter(ctx: Ctx) -> PerfMeter:
+        """Creates a PerfMeter and attaches it to the active request for live tracking."""
         meter = PerfMeter()
         ctx.ar.meter = meter
         return meter
 
     async def record_success(ctx: Ctx, meter: PerfMeter, status: int = 200) -> None:
+        """Copies meter results into the record, releases the lease, and logs the request."""
         for k, v in meter.finish().items():
             setattr(ctx.rec, k, v)
         ctx.rec.status = status
@@ -135,6 +147,7 @@ def create_api_app(core: RouterCore) -> FastAPI:
         await finish(ctx)
 
     async def finish_error(ctx: Ctx, resp: httpx.Response, meter: PerfMeter):
+        """Reads a backend error response, releases the lease, and returns a JSON error response."""
         content = await resp.aread()
         await resp.aclose()
         sched.release(ctx.lease)
@@ -149,6 +162,7 @@ def create_api_app(core: RouterCore) -> FastAPI:
 
     # ------------------------------------------------------------ request
     async def handle(request: Request, path: str):
+        """Parses the request, validates model and priority, and delegates to relay."""
         request_id = uuid.uuid4().hex[:12]
         try:
             body = await request.json()
@@ -196,6 +210,7 @@ def create_api_app(core: RouterCore) -> FastAPI:
             return oai_error(500, "Internal router error", "server_error")
 
     async def relay(request: Request, ctx: Ctx, path: str, body: dict, prio: int, client_stream: bool):
+        """Acquires a backend machine and proxies the request, retrying on unreachable machines."""
         rec, ar, model = ctx.rec, ctx.ar, ctx.public
         exclude: frozenset[str] = frozenset()
 
@@ -275,6 +290,7 @@ def create_api_app(core: RouterCore) -> FastAPI:
 
     # --- streaming client
     async def do_stream(ctx: Ctx, path: str, upstream: dict, injected_usage: bool):
+        """Proxies a streaming response to the client, forwarding SSE chunks."""
         meter = new_meter(ctx)
         resp = await open_upstream(ctx.lease, path, upstream, stream=True)
         if resp.status_code >= 400:
@@ -312,6 +328,7 @@ def create_api_app(core: RouterCore) -> FastAPI:
 
     # --- non-streaming client, internal stream (accurate prefill measurement)
     async def do_aggregate(ctx: Ctx, path: str, upstream: dict):
+        """Streams from the backend internally and returns a single assembled non-streaming response."""
         meter = new_meter(ctx)
         resp = await open_upstream(ctx.lease, path, upstream, stream=True)
         if resp.status_code >= 400:
@@ -335,6 +352,7 @@ def create_api_app(core: RouterCore) -> FastAPI:
 
     # --- end-to-end non-streaming
     async def do_plain(ctx: Ctx, path: str, upstream: dict):
+        """Sends a non-streaming request to the backend and returns the response directly."""
         meter = new_meter(ctx)
         try:
             resp = await open_upstream(ctx.lease, path, upstream, stream=False)
@@ -355,6 +373,7 @@ def create_api_app(core: RouterCore) -> FastAPI:
 
     # --- embeddings: prefill only
     async def do_embeddings(ctx: Ctx, upstream: dict):
+        """Sends an embeddings request and records prefill throughput."""
         upstream.pop("stream", None)
         rec = ctx.rec
         new_meter(ctx)
@@ -386,18 +405,22 @@ def create_api_app(core: RouterCore) -> FastAPI:
     # ------------------------------------------------------------- routes
     @app.post("/v1/chat/completions")
     async def chat_completions(request: Request):
+        """POST /v1/chat/completions handler."""
         return await handle(request, "chat/completions")
 
     @app.post("/v1/completions")
     async def completions(request: Request):
+        """POST /v1/completions handler."""
         return await handle(request, "completions")
 
     @app.post("/v1/embeddings")
     async def embeddings(request: Request):
+        """POST /v1/embeddings handler."""
         return await handle(request, "embeddings")
 
     @app.get("/v1/models")
     async def list_models():
+        """GET /v1/models handler, returning all available models."""
         data = []
         for name, deps in sorted(sched.deployments.items()):
             data.append({
@@ -409,6 +432,7 @@ def create_api_app(core: RouterCore) -> FastAPI:
 
     @app.get("/health")
     async def health():
+        """GET /health handler, always returns 200 ok."""
         return {"status": "ok"}
 
     return app

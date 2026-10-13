@@ -38,6 +38,7 @@ class QueueTimeout(Exception):
 
 
 def parse_priority(value, default: str = "medium") -> int:
+    """Converts a priority string (or None) to its integer value, raising ValueError if invalid."""
     if value is None or value == "":
         return PRIORITIES[default]
     v = str(value).strip().lower()
@@ -59,13 +60,16 @@ class Machine:
 
     @property
     def name(self) -> str:
+        """Returns the machine's configured name."""
         return self.cfg.name
 
     @property
     def available(self) -> bool:
+        """True when the machine is enabled and currently healthy."""
         return self.cfg.enabled and self.healthy
 
     def update_perf(self, prefill: Optional[float], gen: Optional[float], alpha: float = 0.2) -> None:
+        """Updates EMA estimates of prefill and generation throughput."""
         if prefill:
             self.ema_prefill = prefill if self.ema_prefill is None else alpha * prefill + (1 - alpha) * self.ema_prefill
         if gen:
@@ -80,6 +84,7 @@ class Deployment:
     active: int = 0
 
     def has_free_slot(self) -> bool:
+        """True if the machine and deployment can accept another concurrent request."""
         m = self.machine
         if not m.available or m.active >= m.cfg.max_concurrent:
             return False
@@ -95,6 +100,7 @@ class Lease:
 
     @property
     def machine(self) -> Machine:
+        """Returns the Machine backing this lease."""
         return self.deployment.machine
 
 
@@ -114,6 +120,7 @@ class Waiter:
 
 class Scheduler:
     def __init__(self, config: Config):
+        """Loads machines from config and builds the initial deployment index."""
         self.server = config.server
         self.machines: dict[str, Machine] = {}
         self.deployments: dict[str, list[Deployment]] = {}
@@ -140,10 +147,12 @@ class Scheduler:
         self.dispatch()
 
     def _validate(self, machines: list[MachineConfig]) -> None:
+        """Validates model-type consistency across the given machine list."""
         from .config import check_model_types
         check_model_types(machines)
 
     def add_machine(self, mc: MachineConfig) -> Machine:
+        """Adds a new machine to the pool and rebuilds the deployment index."""
         if mc.name in self.machines:
             raise ValueError(f"Machine '{mc.name}' already exists")
         self._validate([m.cfg for m in self.machines.values()] + [mc])
@@ -154,6 +163,7 @@ class Scheduler:
         return machine
 
     def update_machine(self, name: str, mc: MachineConfig) -> Machine:
+        """Replaces a machine's config and rebuilds the deployment index."""
         machine = self.machines.get(name)
         if machine is None:
             raise KeyError(name)
@@ -178,6 +188,7 @@ class Scheduler:
         return machine
 
     def set_enabled(self, name: str, enabled: bool) -> Machine:
+        """Enables or disables a machine and triggers dispatch or orphan failure accordingly."""
         machine = self.machines[name]
         machine.cfg.enabled = enabled
         if enabled:
@@ -188,10 +199,12 @@ class Scheduler:
 
     # ------------------------------------------------------------------ infos
     def model_type(self, model: str) -> Optional[str]:
+        """Returns the model type ('llm' or 'embedding'), or None if the model is unknown."""
         deps = self.deployments.get(model)
         return deps[0].model.type if deps else None
 
     def effective_priority(self, w: Waiter, now: float) -> int:
+        """Returns the waiter's priority after applying time-based aging."""
         if self.server.aging_seconds > 0:
             boost = math.floor((now - w.enqueued_at) / self.server.aging_seconds)
             return max(0, w.priority - boost)
@@ -210,6 +223,7 @@ class Scheduler:
         ))
 
     def _lease(self, dep: Deployment) -> Lease:
+        """Increments active counters and returns a new Lease for the deployment."""
         dep.active += 1
         dep.machine.active += 1
         return Lease(dep)
@@ -233,6 +247,7 @@ class Scheduler:
 
     # ----------------------------------------------------------------- API
     def check_model(self, model: str, exclude: frozenset[str] = frozenset()) -> None:
+        """Raises ModelNotFound or NoHealthyBackend if the model cannot be served."""
         deps = self.deployments.get(model)
         if not deps:
             raise ModelNotFound(model)
@@ -283,6 +298,7 @@ class Scheduler:
             raise
 
     def release(self, lease: Lease) -> None:
+        """Releases a lease, decrements active counters, and triggers dispatch."""
         if lease.released:
             return
         lease.released = True
@@ -291,6 +307,7 @@ class Scheduler:
         self.dispatch()
 
     def set_health(self, machine: Machine, healthy: bool, error: Optional[str] = None) -> None:
+        """Updates a machine's health status and triggers dispatch or orphan failure."""
         changed = machine.healthy != healthy
         machine.healthy = healthy
         machine.last_error = error
@@ -314,6 +331,7 @@ class Scheduler:
 
     # -------------------------------------------------------------- statut
     def machine_info(self, m: Machine) -> dict:
+        """Returns a serializable dict describing a machine and its deployments."""
         deps = {d.model.name: d for ds in self.deployments.values() for d in ds if d.machine is m}
         return {
             "name": m.name, "url": m.cfg.url, "enabled": m.cfg.enabled, "healthy": m.healthy,
@@ -330,6 +348,7 @@ class Scheduler:
         }
 
     def snapshot(self) -> dict:
+        """Returns a full dict of all machines and the sorted wait queue."""
         now = time.monotonic()
         return {
             "machines": [self.machine_info(m) for m in self.machines.values()],
