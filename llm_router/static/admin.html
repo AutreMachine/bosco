@@ -235,7 +235,7 @@ dialog::backdrop { background: rgba(10,14,20,.45); }
           <thead><tr>
             <th>Date</th><th>ID</th><th>Client</th><th>Type</th><th>Model</th><th>Machine</th><th>Prio.</th><th>Status</th>
             <th class="r">Queue</th><th class="r">TTFT</th><th class="r">Total</th><th class="r">Prompt</th><th class="r">Compl.</th>
-            <th class="r">Prefill tok/s</th><th class="r">Gen. tok/s</th>
+            <th class="r">Prefill tok/s</th><th class="r">Gen. tok/s</th><th class="r">Duration</th>
           </tr></thead>
           <tbody id="h-body"></tbody>
         </table>
@@ -479,20 +479,28 @@ async function loadHistory() {
   $("#h-body").innerHTML = d.rows.length ? d.rows.map(r => {
     const open = H.open.has(r.request_id);
     const row = `<tr class="clickable ${r.status >= 400 ? "err" : ""}" data-id="${esc(r.request_id)}" title="${esc(r.error ?? "")}">
-      <td class="num">${when(r.ts)}</td><td class="mono">${esc(r.request_id)}</td><td>${esc(r.client ?? "—")}</td>
+      <td class="num">${when(r.ts)}</td>
+      <td class="mono">${esc(r.request_id)}</td><td>${esc(r.client ?? "—")}</td>
       <td class="muted">${esc(EP[r.endpoint] ?? r.endpoint)}${r.stream ? " · stream" : ""}</td>
-      <td class="mono">${esc(r.model)}</td><td>${esc(r.machine ?? "—")}</td><td>${prioBadge(r.priority)}</td><td>${statusBadge(r.status)}</td>
-      <td class="r num">${ms(r.queue_wait_ms)}</td><td class="r num">${ms(r.ttft_ms)}</td><td class="r num">${ms(r.total_ms)}</td>
-      <td class="r num">${num(r.prompt_tokens, nf0)}</td><td class="r num">${num(r.completion_tokens, nf0)}</td>
-      <td class="r num">${num(r.prefill_tps)}</td><td class="r num">${num(r.gen_tps)}</td></tr>`;
-    const detail = open ? `<tr class="detail"><td colspan="15"><div class="detail-grid">
+      <td class="mono">${esc(r.model)}</td><td>${esc(r.machine ?? "—")}</td>
+      <td>${prioBadge(r.priority)}</td><td>${statusBadge(r.status)}</td>
+      <td class="r num">${ms(r.queue_wait_ms)}</td>
+      <td class="r num">${ms(r.ttft_ms)}</td>
+      <td class="r num">${ms(r.total_ms)}</td>
+      <td class="r num">${num(r.prompt_tokens, nf0)}</td>
+      <td class="r num">${num(r.completion_tokens, nf0)}</td>
+      <td class="r num">${num(r.prefill_tps)}</td>
+      <td class="r num">${num(r.gen_tps)}</td>
+      <td class="r num">${ms(r.total_duration_request)}</td></tr>`;
+    const detail = open ? `<tr class="detail"><td colspan="16"><div class="detail-grid">
       <span class="muted">Date</span><span>${new Date(r.ts * 1000).toLocaleString("en-US")}</span>
       <span class="muted">Client IP</span><span class="mono">${esc(r.client_ip ?? "—")}</span>
       <span class="muted">Metrics source</span><span>${esc(r.metrics_source ?? "—")}</span>
+      <span class="muted">Total duration for the request</span><span class="num">${ms(r.total_duration_request)}</span>
       ${r.error ? `<span class="muted">Error / note</span><pre>${esc(r.error)}</pre>` : ""}
     </div></td></tr>` : "";
     return row + detail;
-  }).join("") : `<tr><td colspan="15" class="empty">No requests for these filters.</td></tr>`;
+  }).join("") : `<tr><td colspan="16" class="empty">No requests for these filters.</td></tr>`;
 }
 $("#h-body").onclick = e => {
   const tr = e.target.closest("tr.clickable"); if (!tr) return;
