@@ -196,7 +196,7 @@ def load_config(path: str | Path) -> Config:
     data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
     server = ServerConfig(**(data.get("server") or {}))
     if server.default_priority.lower() not in ("low", "medium", "high"):
-        raise ValueError("server.default_priority doit être low, medium ou high")
+        raise ValueError("server.default_priority must be low, medium or high")
     server.parsed_keys()  # validation
     admin = AdminConfig(**(data.get("admin") or {}))
     cfg = Config(server=server, machines=[], admin=admin, path=path)
