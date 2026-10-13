@@ -7,6 +7,7 @@ import json
 import logging
 import time
 import uuid
+from datetime import datetime, timezone
 from typing import Optional
 
 import httpx
@@ -14,7 +15,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from .core import ActiveRequest, RouterCore
-from .metrics import RequestRecord
+from .models import RequestRecord
 from .proxy import PerfMeter, StreamAggregator, parse_sse_line
 from .scheduler import (PRIORITY_NAMES, Lease, Machine, ModelNotFound, NoHealthyBackend, QueueFull,
                         QueueTimeout, parse_priority)
@@ -22,6 +23,25 @@ from .scheduler import (PRIORITY_NAMES, Lease, Machine, ModelNotFound, NoHealthy
 log = logging.getLogger("llm_router.api")
 
 ENDPOINT_KIND = {"chat/completions": "llm", "completions": "llm", "embeddings": "embedding"}
+
+
+def _parse_request_time(value: Optional[str]) -> float:
+    """Parses X-Request-Time as a UTC Unix timestamp; falls back to now.
+
+    Accepts a Unix timestamp float string (e.g. "1703123456.789") or an
+    ISO 8601 string (e.g. "2024-01-01T12:00:00Z").
+    """
+    if value:
+        try:
+            return float(value)
+        except ValueError:
+            pass
+        try:
+            dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            return dt.replace(tzinfo=dt.tzinfo or timezone.utc).timestamp()
+        except ValueError:
+            pass
+    return time.time()
 PUBLIC_PATHS = {"/health"}
 
 
@@ -106,6 +126,10 @@ def create_api_app(core: RouterCore) -> FastAPI:
     # ------------------------------------------------------------ helpers
     async def finish(ctx: Ctx) -> None:
         """End of request lifecycle: remove from live tracking and log."""
+        if ctx.rec.request_time is not None:
+            ctx.rec.total_duration_request = round(
+                (time.time() - ctx.rec.request_time) * 1000, 2
+            )
         core.active.pop(ctx.rec.request_id, None)
         await metrics.record(ctx.rec)
 
@@ -191,8 +215,10 @@ def create_api_app(core: RouterCore) -> FastAPI:
         client_name = request.scope.get("state", {}).get("client_name")
         client_ip = request.client.host if request.client else None
         prio_name = PRIORITY_NAMES[prio]
+        request_time = _parse_request_time(request.headers.get("x-request-time"))
         rec = RequestRecord(request_id=request_id, endpoint=path, model=model, machine=None, priority=prio_name,
-                            stream=client_stream, status=0, client=client_name, client_ip=client_ip)
+                            stream=client_stream, status=0, client=client_name, client_ip=client_ip,
+                            request_time=request_time)
         ar = ActiveRequest(id=request_id, endpoint=path, model=model, priority=prio_name, stream=client_stream,
                            client=client_name, client_ip=client_ip)
         core.active[request_id] = ar

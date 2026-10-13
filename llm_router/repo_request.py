@@ -28,8 +28,10 @@ CREATE TABLE IF NOT EXISTS requests (
     gen_tps           REAL,
     metrics_source    TEXT,
     error             TEXT,
-    client            TEXT,
-    client_ip         TEXT
+    client                  TEXT,
+    client_ip               TEXT,
+    request_time            REAL,
+    total_duration_request  REAL
 );
 CREATE INDEX IF NOT EXISTS idx_requests_ts ON requests(ts);
 CREATE INDEX IF NOT EXISTS idx_requests_mm ON requests(machine, model);
@@ -51,9 +53,15 @@ class RequestRepository:
         """Creates tables and indexes; migrates legacy databases that predate the client columns."""
         self._db.executescript(SCHEMA)
         cols = {r[1] for r in self._db.execute("PRAGMA table_info(requests)")}
-        for col in ("client", "client_ip"):
+        migrations: dict[str, str] = {
+            "client": "TEXT",
+            "client_ip": "TEXT",
+            "request_time": "REAL",
+            "total_duration_request": "REAL",
+        }
+        for col, col_type in migrations.items():
             if col not in cols:
-                self._db.execute(f"ALTER TABLE requests ADD COLUMN {col} TEXT")
+                self._db.execute(f"ALTER TABLE requests ADD COLUMN {col} {col_type}")
         self._db.execute("CREATE INDEX IF NOT EXISTS idx_requests_status ON requests(status)")
         self._db.commit()
 

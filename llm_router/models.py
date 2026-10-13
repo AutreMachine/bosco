@@ -27,3 +27,5 @@ class RequestRecord:
     client: Optional[str] = None          # name of the API key used
     client_ip: Optional[str] = None
     ts: float = 0.0
+    request_time: Optional[float] = None   # UTC Unix timestamp supplied by the caller (X-Request-Time)
+    total_duration_request: Optional[float] = None  # ms from request_time to response complete
