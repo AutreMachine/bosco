@@ -20,10 +20,12 @@ class LanOnlyMiddleware:
     """Rejects any IP outside the allowed networks (safety net if the port is accidentally exposed)."""
 
     def __init__(self, inner, networks: list[str]):
+        """Parses and stores the allowed CIDR networks."""
         self.inner = inner
         self.networks = [ipaddress.ip_network(n, strict=False) for n in networks]
 
     def allowed(self, host: Optional[str]) -> bool:
+        """Returns True if the host IP falls within an allowed network."""
         if not host:
             return False
         try:
@@ -35,6 +37,7 @@ class LanOnlyMiddleware:
         return any(ip in n for n in self.networks)
 
     async def __call__(self, scope, receive, send):
+        """Rejects non-LAN requests with 403 before passing them to the inner app."""
         if scope["type"] in ("http", "websocket"):
             host = (scope.get("client") or (None, 0))[0]
             if not self.allowed(host):
@@ -45,26 +48,31 @@ class LanOnlyMiddleware:
 
 
 def create_admin_app(core: RouterCore) -> FastAPI:
+    """Creates and configures the admin console FastAPI application."""
     sched, metrics = core.scheduler, core.metrics
     app = FastAPI(title="LLM Router — console", docs_url="/api/docs", redoc_url=None, openapi_url="/api/openapi.json")
     app.state.core = core
     app.add_middleware(LanOnlyMiddleware, networks=core.config.admin.allowed_networks)
 
     def bad_request(e: Exception):
+        """Raises HTTP 400 with the exception message as detail."""
         raise HTTPException(status_code=400, detail=str(e))
 
     def get_machine(name: str):
+        """Returns the named Machine or raises HTTP 404."""
         if name not in sched.machines:
             raise HTTPException(status_code=404, detail=f"Unknown machine: {name}")
         return sched.machines[name]
 
     @app.get("/", include_in_schema=False)
     async def index():
+        """Serves the admin HTML page."""
         return FileResponse(STATIC / "admin.html", headers={"Cache-Control": "no-cache"})
 
     # ------------------------------------------------------------- live
     @app.get("/api/overview")
     async def overview():
+        """Returns uptime, slot usage, queue depth, and last-hour metrics."""
         machines = list(sched.machines.values())
         active = list(core.active.values())
         return {
@@ -82,6 +90,7 @@ def create_admin_app(core: RouterCore) -> FastAPI:
 
     @app.get("/api/active")
     async def active():
+        """Returns in-flight requests and current machine states."""
         return {"requests": core.active_snapshot(),
                 "machines": [sched.machine_info(m) for m in sched.machines.values()]}
 
@@ -92,21 +101,25 @@ def create_admin_app(core: RouterCore) -> FastAPI:
                        priority: Optional[str] = None, client: Optional[str] = None,
                        endpoint: Optional[str] = None, status: Optional[str] = None,
                        hours: Optional[float] = None, q: Optional[str] = None):
+        """Returns paginated and filtered request history."""
         since = time.time() - hours * 3600 if hours else None
         return await metrics.query(limit, offset, model=model, machine=machine, priority=priority,
                                    client=client, endpoint=endpoint, status=status, since=since, q=q)
 
     @app.get("/api/stats")
     async def stats(hours: float = 24, model: Optional[str] = None, machine: Optional[str] = None):
+        """Returns per-machine/model performance aggregates for the given time window."""
         return {"hours": hours, "stats": await metrics.stats(hours, model, machine)}
 
     # ------------------------------------------------------------- machines
     @app.get("/api/machines")
     async def list_machines():
+        """Returns info for all machines in the pool."""
         return {"machines": [sched.machine_info(m) for m in sched.machines.values()]}
 
     @app.post("/api/machines", status_code=201)
     async def add_machine(payload: dict = Body(...)):
+        """Adds a new machine to the pool."""
         try:
             return await core.add_machine(payload)
         except (ValueError, TypeError) as e:
@@ -114,6 +127,7 @@ def create_admin_app(core: RouterCore) -> FastAPI:
 
     @app.put("/api/machines/{name}")
     async def update_machine(name: str, payload: dict = Body(...)):
+        """Updates an existing machine's configuration."""
         get_machine(name)
         try:
             return await core.update_machine(name, payload)
@@ -122,6 +136,7 @@ def create_admin_app(core: RouterCore) -> FastAPI:
 
     @app.delete("/api/machines/{name}")
     async def delete_machine(name: str):
+        """Removes a machine from the pool."""
         m = get_machine(name)
         running = m.active
         core.remove_machine(name)
@@ -129,16 +144,19 @@ def create_admin_app(core: RouterCore) -> FastAPI:
 
     @app.post("/api/machines/{name}/enable")
     async def enable(name: str):
+        """Enables a machine so it accepts new requests."""
         get_machine(name)
         return await core.set_enabled(name, True)
 
     @app.post("/api/machines/{name}/disable")
     async def disable(name: str):
+        """Disables a machine so it stops accepting new requests."""
         get_machine(name)
         return await core.set_enabled(name, False)
 
     @app.post("/api/machines/{name}/check")
     async def check(name: str):
+        """Probes the machine's health and returns its updated status."""
         m = get_machine(name)
         await core.check_machine(m)
         return sched.machine_info(m)
