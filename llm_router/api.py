@@ -130,6 +130,7 @@ def create_api_app(core: RouterCore) -> FastAPI:
             ctx.rec.total_duration_request = round(
                 (time.time() - ctx.rec.request_time) * 1000, 2
             )
+                        
         core.active.pop(ctx.rec.request_id, None)
         await metrics.record(ctx.rec)
 
@@ -215,7 +216,7 @@ def create_api_app(core: RouterCore) -> FastAPI:
         client_name = request.scope.get("state", {}).get("client_name")
         client_ip = request.client.host if request.client else None
         prio_name = PRIORITY_NAMES[prio]
-        request_time = _parse_request_time(request.headers.get("x-request-time"))
+        request_time = _parse_request_time(request.headers.get("X-Request-Time"))
         rec = RequestRecord(request_id=request_id, endpoint=path, model=model, machine=None, priority=prio_name,
                             stream=client_stream, status=0, client=client_name, client_ip=client_ip,
                             request_time=request_time)
