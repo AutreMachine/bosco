@@ -14,6 +14,9 @@ The idea : Grow your LLM farm and just call one endpoint.
 
 <img width="1405" height="517" alt="image" src="https://github.com/user-attachments/assets/8f7c30db-7ca5-4024-b5b2-043cb86dffe9" />
 
+# Updates
+**2026/10/23** : Added the route /v1/systemone to process **JEV** calls. Tested with <em>nimble:latest</em> and <em>nimb-v3:9b</em>
+
 
 # LLM Router
 
