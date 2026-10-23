@@ -274,8 +274,14 @@ def create_api_app(core: RouterCore) -> FastAPI:
 
             # ---- 2. proxy
             try:
+                #specific to embeddings
                 if path == "embeddings":
                     return await do_embeddings(ctx, upstream)
+                
+                #specific to jev
+                if path == "systemone":
+                    return await do_jev(ctx, upstream=upstream)
+                
                 use_stream = client_stream or srv.internal_streaming
                 injected_usage = False
                 if use_stream:
@@ -423,6 +429,42 @@ def create_api_app(core: RouterCore) -> FastAPI:
         rec.prompt_tokens = usage.get("prompt_tokens") or usage.get("total_tokens")
         if rec.prompt_tokens and dt > 0:
             rec.prefill_tps = rec.prompt_tokens / dt
+        rec.metrics_source = "total_only"
+        rec.status = 200
+        ctx.lease.machine.update_perf(rec.prefill_tps, None)
+        await finish(ctx)
+        return JSONResponse(rewrite_model(data, ctx.public), headers=ctx.headers)
+    
+    # --- embeddings: prefill only
+    async def do_jev(ctx: Ctx, upstream: dict):
+        """Sends an embeddings request and records prefill throughput."""
+        upstream.pop("stream", None)
+        rec = ctx.rec
+        new_meter(ctx)
+        t0 = time.perf_counter()
+        try:
+            resp = await open_upstream(ctx.lease, "systemone", upstream, stream=False)
+        finally:
+            sched.release(ctx.lease)
+        dt = time.perf_counter() - t0
+        rec.total_ms = dt * 1000
+        if resp.status_code >= 400:
+            rec.status, rec.error = resp.status_code, resp.text[:500]
+            await finish(ctx)
+            try:
+                return JSONResponse(status_code=resp.status_code, content=resp.json(), headers=ctx.headers)
+            except json.JSONDecodeError:
+                return oai_error(resp.status_code, rec.error, "server_error", headers=ctx.headers)
+        data = resp.json()
+        usage = data.get("usage") or {}
+        rec.prompt_tokens = usage.get("prompt_tokens") or usage.get("input_tokens")
+        if rec.prompt_tokens and dt > 0:
+            rec.prefill_tps = rec.prompt_tokens / dt
+        rec.completion_tokens = usage.get("output_tokens")
+        if rec.completion_tokens==0:
+            rec.completion_tokens = None
+        if rec.completion_tokens and dt > 0:
+            rec.gen_tps = rec.completion_tokens / dt
         rec.metrics_source = "total_only"
         rec.status = 200
         ctx.lease.machine.update_perf(rec.prefill_tps, None)
