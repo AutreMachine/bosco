@@ -12,6 +12,7 @@ from llm_router.scheduler import PRIORITIES, ModelNotFound, Scheduler
 
 
 def make_config(tmp_path, **server):
+    """Creates a minimal single-machine Config for unit tests."""
     return Config(
         server=ServerConfig(db_path=str(tmp_path / "m.db"), log_file=None, health_check_interval=0, **server),
         machines=[MachineConfig(name="a", url="http://x/v1", max_concurrent=1, models=[ModelConfig("m")])],
@@ -19,6 +20,7 @@ def make_config(tmp_path, **server):
 
 
 def test_priority_and_aging(tmp_path):
+    """Priority aging promotes a low-priority waiter above a later high-priority one."""
     async def run():
         sched = Scheduler(make_config(tmp_path, aging_seconds=0.3))
         first, _ = await sched.acquire("m", PRIORITIES["low"])
@@ -44,6 +46,7 @@ def test_priority_and_aging(tmp_path):
 
 
 def test_auth(tmp_path):
+    """API key middleware blocks unauthenticated requests and allows valid ones."""
     async def run():
         key = "secret-0123456789abcdef"
         app = create_api_app(RouterCore(make_config(tmp_path, api_keys=[key])))
@@ -58,11 +61,13 @@ def test_auth(tmp_path):
 
 
 def test_short_key_rejected(tmp_path):
+    """parsed_keys raises ValueError when a key is shorter than 16 characters."""
     with pytest.raises(ValueError):
         make_config(tmp_path, api_keys=["court"]).server.parsed_keys()
 
 
 def test_lan_filter():
+    """LanOnlyMiddleware admits LAN addresses and rejects public ones."""
     mw = LanOnlyMiddleware(None, ["127.0.0.0/8", "192.168.0.0/16", "fc00::/7"])
     assert mw.allowed("192.168.1.20") and mw.allowed("127.0.0.1") and mw.allowed("::ffff:192.168.1.2")
     assert not mw.allowed("8.8.8.8") and not mw.allowed("2001:db8::1") and not mw.allowed(None)

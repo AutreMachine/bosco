@@ -69,6 +69,7 @@ admin:
 
 
 def wait_up(url, timeout=15):
+    """Polls a URL until it responds or the timeout expires."""
     t0 = time.time()
     while time.time() - t0 < timeout:
         try:
@@ -81,6 +82,7 @@ def wait_up(url, timeout=15):
 
 @pytest.fixture(scope="session", autouse=True)
 def stack(tmp_path_factory):
+    """Session-scoped fixture: starts fake backends and the router, yields the tmp directory path."""
     tmp = tmp_path_factory.mktemp("router")
     procs = []
     for port, name, models, pf, gen, extra in BACKENDS:
@@ -106,19 +108,23 @@ def stack(tmp_path_factory):
 
 
 def chat(content, model="llama", max_tokens=10, **kw):
+    """Builds a chat completion request body."""
     return {"model": model, "messages": [{"role": "user", "content": content}], "max_tokens": max_tokens, **kw}
 
 
 def last_records(n=1):
+    """Returns the n most recent request records from the admin API."""
     return httpx.get(f"{ADMIN}/api/requests", params={"limit": n}).json()["rows"]
 
 
 def post(path, json, **kw):
+    """Posts to the router with the test API key attached."""
     return httpx.post(f"{ROUTER}{path}", json=json, headers={**AUTH, **kw.pop("headers", {})},
                       timeout=kw.pop("timeout", 30), **kw)
 
 
 def machine(name):
+    """Returns the machine dict for the given name from the admin API."""
     return next(m for m in httpx.get(f"{ADMIN}/api/machines").json()["machines"] if m["name"] == name)
 
 

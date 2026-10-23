@@ -26,10 +26,12 @@ class _Server(uvicorn.Server):
 
     @contextlib.contextmanager
     def capture_signals(self):
+        """No-op signal capture so uvicorn doesn't intercept SIGINT/SIGTERM."""
         yield
 
 
 async def run(cfg: Config, log_level: str) -> None:
+    """Starts the API and admin servers, waits for shutdown, then cleans up."""
     core = RouterCore(cfg)
     srv, adm = cfg.server, cfg.admin
     servers = [_Server(uvicorn.Config(
@@ -44,6 +46,7 @@ async def run(cfg: Config, log_level: str) -> None:
         )))
 
     def stop(*_):
+        """Sets should_exit on all servers, triggering a graceful shutdown."""
         for s in servers:
             s.should_exit = True
 
@@ -66,6 +69,7 @@ async def run(cfg: Config, log_level: str) -> None:
 
 
 def main() -> None:
+    """Parses CLI arguments, validates config, and launches the router."""
     p = argparse.ArgumentParser(description="Load balancer / OpenAI-compatible router for LLMs and embeddings")
     p.add_argument("-c", "--config", default="config.yaml")
     p.add_argument("--log-level", default="info")

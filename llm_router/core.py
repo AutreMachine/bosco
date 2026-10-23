@@ -35,6 +35,7 @@ class ActiveRequest:
     attempt: int = 1
 
     def to_dict(self, now: float, queue_pos: Optional[int] = None, eff_prio: Optional[str] = None) -> dict:
+        """Serializes the request to a dict, including live perf metrics when running."""
         d = {
             "id": self.id, "endpoint": self.endpoint, "model": self.model, "priority": self.priority,
             "effective_priority": eff_prio or self.priority, "stream": self.stream, "client": self.client,
@@ -62,6 +63,7 @@ class ActiveRequest:
 
 class RouterCore:
     def __init__(self, config: Config):
+        """Creates the scheduler, metrics store, HTTP client, and loads API keys."""
         self.config = config
         srv = config.server
         self.scheduler = Scheduler(config)
@@ -78,12 +80,14 @@ class RouterCore:
 
     # ------------------------------------------------------------- lifecycle
     async def start(self) -> None:
+        """Starts the background health-check task and logs startup info."""
         if self.config.server.health_check_interval > 0:
             self._health_task = asyncio.create_task(self._health_loop())
         log.info("Router ready: %d machine(s), models: %s", len(self.scheduler.machines),
                  ", ".join(sorted(self.scheduler.deployments)) or "(none)")
 
     async def stop(self) -> None:
+        """Cancels the health task, closes the HTTP client, and flushes metrics."""
         if self._health_task:
             self._health_task.cancel()
         await self.http.aclose()
@@ -92,6 +96,7 @@ class RouterCore:
     # ------------------------------------------------------------- health
     @staticmethod
     def _auth_headers(api_key: Optional[str]) -> dict:
+        """Returns an Authorization header dict if an api_key is provided, otherwise empty."""
         return {"Authorization": f"Bearer {api_key}"} if api_key else {}
 
     async def probe(self, url: str, api_key: Optional[str] = None) -> dict:
@@ -105,6 +110,7 @@ class RouterCore:
         return {"models": [m for m in models if m], "latency_ms": round((time.perf_counter() - t0) * 1000, 1)}
 
     async def check_machine(self, m: Machine) -> None:
+        """Probes a machine and updates its health state in the scheduler."""
         try:
             await self.probe(m.cfg.url, m.cfg.api_key)
             self.scheduler.set_health(m, True)
@@ -112,6 +118,7 @@ class RouterCore:
             self.scheduler.set_health(m, False, f"{type(e).__name__}: {e}")
 
     async def _health_loop(self) -> None:
+        """Periodically probes all enabled machines and updates their health state."""
         while True:
             machines = [m for m in self.scheduler.machines.values() if m.cfg.enabled]
             await asyncio.gather(*(self.check_machine(m) for m in machines), return_exceptions=True)
@@ -119,6 +126,7 @@ class RouterCore:
 
     # ------------------------------------------------------------- pool
     def _persist(self) -> None:
+        """Saves the current machine pool to the configured machines file."""
         path = self.config.resolve(self.config.server.machines_file)
         if path is None:
             log.warning("server.machines_file not defined: change will not be persisted")
@@ -127,6 +135,7 @@ class RouterCore:
         log.info("Machine pool saved to %s", path)
 
     async def add_machine(self, raw: dict) -> dict:
+        """Adds a machine, persists the pool, and runs an initial health check."""
         mc = machine_from_dict(raw)
         machine = self.scheduler.add_machine(mc)
         self._persist()
@@ -135,6 +144,7 @@ class RouterCore:
         return self.scheduler.machine_info(machine)
 
     async def update_machine(self, name: str, raw: dict) -> dict:
+        """Updates a machine's config, persists the pool, and re-checks health."""
         current = self.scheduler.machines[name]
         raw = dict(raw, name=name)
         if raw.get("api_key") is None:          # field absent / null: key unchanged
@@ -147,10 +157,12 @@ class RouterCore:
         return self.scheduler.machine_info(machine)
 
     def remove_machine(self, name: str) -> None:
+        """Removes a machine from the pool and persists the change."""
         self.scheduler.remove_machine(name)
         self._persist()
 
     async def set_enabled(self, name: str, enabled: bool) -> dict:
+        """Enables or disables a machine, persists the change, and re-checks health if enabled."""
         machine = self.scheduler.set_enabled(name, enabled)
         self._persist()
         if enabled:
@@ -159,6 +171,7 @@ class RouterCore:
 
     # ------------------------------------------------------------- live tracking
     def active_snapshot(self) -> list[dict]:
+        """Returns a sorted list of active request dicts with live performance metrics."""
         now = time.time()
         snap = self.scheduler.snapshot()["queue"]
         pos = {q["tag"]: (i + 1, q["effective_priority"]) for i, q in enumerate(snap)}
