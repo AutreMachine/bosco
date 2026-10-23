@@ -17,6 +17,7 @@ The idea : Grow your LLM farm and just call one endpoint.
 # Updates
 **2026/10/23** : Added the route /v1/systemone to process **JEV** calls. Tested with <em>nimble:latest</em> and <em>nimb-v3:9b</em>
 
+**2026/10/22** : Added a header <em>X-Request-Time</em> to mark the beginning of the request ; any business date can be passed in the header, it will be used to compute a Total Request Time.
 
 # LLM Router
 
