@@ -22,7 +22,7 @@ from .scheduler import (PRIORITY_NAMES, Lease, Machine, ModelNotFound, NoHealthy
 
 log = logging.getLogger("llm_router.api")
 
-ENDPOINT_KIND = {"chat/completions": "llm", "completions": "llm", "embeddings": "embedding"}
+ENDPOINT_KIND = {"chat/completions": "llm", "completions": "llm", "embeddings": "embedding", "systemone":"llm"}
 
 
 def _parse_request_time(value: Optional[str]) -> float:
@@ -444,6 +444,12 @@ def create_api_app(core: RouterCore) -> FastAPI:
     async def embeddings(request: Request):
         """POST /v1/embeddings handler."""
         return await handle(request, "embeddings")
+    
+    #Endpoint for JEV
+    @app.post("/v1/systemone")
+    async def completions(request: Request):
+        """POST /v1/systemone handler."""
+        return await handle(request, "systemone")
 
     @app.get("/v1/models")
     async def list_models():
