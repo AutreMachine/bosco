@@ -663,6 +663,27 @@ async function loadStats() {
 }
 $("#s-hours").onchange = () => loadStats();
 
+// ------------------------------------------------------------------ SUBSTITUTIONS
+let substitutions = [];
+async function loadSubstitutions() {
+  substitutions = (await api("/api/substitutions")).substitutions;
+  $("#cnt-substitutions").textContent = machines.length;
+  $("#s-cards").innerHTML = substitutions.length ? substitutions.map(s => {
+    return `<div class="card" data-name="${esc(s.llm)}">
+      <div class="head"><span class="dot"></span><span class="name">${esc(s.llm)}</span>
+      <div class="url">List of LLM substitutions :</div>
+      <div class="chips">${s.substitutions.map(x => `<span title="${x.name}">${esc(x.name)}</span>
+        <div class="actions">
+        <button class="btn sm" data-act="edit">Edit</button>
+        <span class="spacer"></span>
+        <button class="btn sm danger" data-act="delete">Remove</button>
+      </div>`).join("") || '<span class="muted">No models</span>'}</div>
+      
+      
+    </div>`;
+  }).join("") : '<div class="panel empty">No substitution in the pool. Click "Add a substitution".</div>';
+}
+
 // ------------------------------------------------------------------ refresh loop
 let busy = false, lastOk = Date.now(), tick = 0;
 async function refresh(force = false) {
