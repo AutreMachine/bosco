@@ -173,7 +173,10 @@ def create_admin_app(core: RouterCore) -> FastAPI:
     @app.get("/api/substitutions")
     async def list_substitutions():
         """Returns info for all substitutions in the pool."""
-        return {"substitutions": [sched.substitution_info(m) for m in core.config.substitutions.values()]}
+        if core.config.substitutions:
+            return {"substitutions": [sched.substitution_info(m) for m in core.config.substitutions]}
+        else:
+            return {"substitutions": []}
 
     @app.post("/api/substitutions", status_code=201)
     async def add_substitution(payload: dict = Body(...)):
@@ -196,8 +199,8 @@ def create_admin_app(core: RouterCore) -> FastAPI:
     async def delete_substitution(llm: str):
         """Removes a substitution from the pool."""
         get_substitution(llm)
-        core.remove_substitution(llm)
-        return {"removed": name, "running_requests_left_to_finish": running}
+        await core.remove_substitution(llm)
+        return {"removed": llm} #, "running_requests_left_to_finish": running
     
     @app.post("/api/probe")
     async def probe(payload: dict = Body(...)):

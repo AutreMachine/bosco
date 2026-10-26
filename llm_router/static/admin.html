@@ -179,6 +179,7 @@ dialog::backdrop { background: rgba(10,14,20,.45); }
       <button data-tab="history">History</button>
       <button data-tab="machines">Machines<span class="count" id="cnt-machines">0</span></button>
       <button data-tab="stats">Statistics</button>
+      <button data-tab="substitutions">Substitutions<span class="count" id="cnt-substitutions">0</span></button>
     </nav>
     <div class="spacer"></div>
     <div class="hdr-meta">
@@ -282,6 +283,19 @@ dialog::backdrop { background: rgba(10,14,20,.45); }
       </table>
     </div>
   </section>
+
+  <!-- ======================================================= SUBSTITUTIONS -->
+  <section id="tab-substitutions" hidden>
+    <div class="toolbar">
+      <span class="muted" id="sub-summary"></span>
+      <div class="spacer"></div>
+      <button class="btn primary" id="sub-add">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg>
+        Add a substitution
+      </button>
+    </div>
+    <div class="cards" id="sub-cards"></div>
+  </section>
 </main>
 
 <!-- ======================================================= MACHINE DIALOG -->
@@ -327,6 +341,32 @@ dialog::backdrop { background: rgba(10,14,20,.45); }
       <span class="form-error" id="form-error"></span>
       <button type="button" class="btn" id="dlg-cancel">Cancel</button>
       <button type="submit" class="btn primary" id="dlg-save">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- ======================================================= SUBSTITUTION DIALOG -->
+<dialog id="sub-dlg">
+  <form id="sub-form" method="dialog" novalidate>
+    <div class="dlg-head"><span id="sub-dlg-title">Add a substitution</span></div>
+    <div class="dlg-body">
+      <label class="field">
+        <span>LLM name <span class="muted">(the model name clients will request)</span></span>
+        <input name="llm" required placeholder="gpt-4" autocomplete="off">
+      </label>
+      <div class="field">
+        <span>Substitute models <span class="muted">(tried in order when the LLM is unavailable)</span></span>
+        <table class="models-table">
+          <thead><tr><th>Model</th><th style="width:36px"></th></tr></thead>
+          <tbody id="sub-models-rows"></tbody>
+        </table>
+        <div><button type="button" class="btn sm" id="sub-add-model">+ Add model</button></div>
+      </div>
+    </div>
+    <div class="dlg-foot">
+      <span class="form-error" id="sub-form-error"></span>
+      <button type="button" class="btn" id="sub-dlg-cancel">Cancel</button>
+      <button type="submit" class="btn primary" id="sub-dlg-save">Save</button>
     </div>
   </form>
 </dialog>
@@ -667,22 +707,117 @@ $("#s-hours").onchange = () => loadStats();
 let substitutions = [];
 async function loadSubstitutions() {
   substitutions = (await api("/api/substitutions")).substitutions;
-  $("#cnt-substitutions").textContent = machines.length;
-  $("#s-cards").innerHTML = substitutions.length ? substitutions.map(s => {
-    return `<div class="card" data-name="${esc(s.llm)}">
-      <div class="head"><span class="dot"></span><span class="name">${esc(s.llm)}</span>
-      <div class="url">List of LLM substitutions :</div>
-      <div class="chips">${s.substitutions.map(x => `<span title="${x.name}">${esc(x.name)}</span>
-        <div class="actions">
+  $("#cnt-substitutions").textContent = substitutions.length;
+  $("#sub-summary").textContent = `${substitutions.length} substitution(s)`;
+  $("#sub-cards").innerHTML = substitutions.length ? substitutions.map(s => {
+    const subs = Array.isArray(s.substitutions) ? s.substitutions.flat() : [];
+    const chips = subs.map(x => {
+      const name = typeof x === "string" ? x : (x.name ?? "");
+      return name ? `<span class="chip">${esc(name)}</span>` : "";
+    }).join("") || '<span class="muted">No substitutes configured</span>';
+    return `<div class="card" data-llm="${esc(s.llm)}">
+      <div class="head"><span class="name">${esc(s.llm)}</span></div>
+      <div class="chips">${chips}</div>
+      <div class="actions">
         <button class="btn sm" data-act="edit">Edit</button>
         <span class="spacer"></span>
         <button class="btn sm danger" data-act="delete">Remove</button>
-      </div>`).join("") || '<span class="muted">No models</span>'}</div>
-      
-      
+      </div>
     </div>`;
-  }).join("") : '<div class="panel empty">No substitution in the pool. Click "Add a substitution".</div>';
+  }).join("") : '<div class="panel empty">No substitutions configured. Click "Add a substitution".</div>';
 }
+$("#sub-cards").onclick = async e => {
+  const b = e.target.closest("button[data-act]"); if (!b) return;
+  const llm = b.closest(".card").dataset.llm, act = b.dataset.act;
+  const enc = encodeURIComponent(llm);
+  try {
+    if (act === "edit") return openSubDialog(substitutions.find(s => s.llm === llm));
+    if (act === "delete") {
+      if (!confirm(`Remove substitution for "${llm}"?`)) return;
+      await api(`/api/substitutions/${enc}`, {method: "DELETE"});
+      toast(`Substitution for ${llm} removed`);
+    }
+  } catch (err) { toast(err.message, true); }
+  loadSubstitutions();
+};
+
+// --- substitution add / edit dialog
+const subDlg = $("#sub-dlg"), subForm = $("#sub-form");
+let editingSub = null, subAvailableModels = [];
+
+function getAvailableModels() {
+  const seen = new Set();
+  const result = [];
+  for (const m of machines) {
+    for (const model of m.models ?? []) {
+      if (!seen.has(model.name)) { seen.add(model.name); result.push(model); }
+    }
+  }
+  return result.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function subModelRow(m = {}) {
+  if (!subAvailableModels.length) return;
+  const tr = document.createElement("tr");
+  const opts = subAvailableModels.map(x =>
+    `<option value="${esc(x.name)}" data-type="${esc(x.type ?? "llm")}">${esc(x.name)}${x.type === "embedding" ? " (emb)" : ""}</option>`
+  ).join("");
+  tr.innerHTML = `<td><select data-k="name">${opts}</select></td>
+    <td><button type="button" class="icon-btn" title="Remove this model" aria-label="Remove this model">✕</button></td>`;
+  const sel = $('select[data-k="name"]', tr);
+  if (m.name) sel.value = m.name;
+  $("button", tr).onclick = () => tr.remove();
+  $("#sub-models-rows").appendChild(tr);
+}
+
+async function openSubDialog(s = null) {
+  editingSub = s; subForm.reset(); $("#sub-models-rows").innerHTML = ""; $("#sub-form-error").textContent = "";
+  $("#sub-dlg-title").textContent = s ? `Edit "${s.llm}"` : "Add a substitution";
+  subForm.llm.readOnly = false;
+  if (!machines.length) machines = (await api("/api/machines")).machines;
+  subAvailableModels = getAvailableModels();
+  if (!subAvailableModels.length) {
+    $("#sub-form-error").textContent = "No models available. Add machines with models first.";
+    $("#sub-dlg-save").disabled = true;
+  } else {
+    $("#sub-dlg-save").disabled = false;
+  }
+  if (s) {
+    subForm.llm.value = s.llm;
+    const subs = Array.isArray(s.substitutions) ? s.substitutions.flat() : [];
+    subs.forEach(x => subModelRow(typeof x === "string" ? {name: x} : x));
+  }
+  if (!$("#sub-models-rows").children.length) subModelRow();
+  subDlg.showModal();
+  subForm.llm.focus();
+}
+$("#sub-add").onclick = () => openSubDialog();
+$("#sub-add-model").onclick = () => subModelRow();
+$("#sub-dlg-cancel").onclick = () => subDlg.close();
+subForm.onsubmit = async e => {
+  e.preventDefault();
+  const models = [...document.querySelectorAll("#sub-models-rows tr")].map(tr => {
+    const sel = $('select[data-k="name"]', tr);
+    const type = sel.selectedOptions[0]?.dataset.type ?? "llm";
+    return {name: sel.value, type};
+  }).filter(m => m.name);
+  const body = {llm: subForm.llm.value.trim(), substitutions: models};
+  if (!body.llm) { $("#sub-form-error").textContent = "LLM name is required."; return; }
+  if (!models.length) { $("#sub-form-error").textContent = "At least one substitute model is required."; return; }
+  if (substitutions.some(s => s.llm === body.llm && s.llm !== editingSub?.llm)) { $("#sub-form-error").textContent = `A substitution for "${body.llm}" already exists.`; return; }
+  if (models.some(m => m.name === body.llm)) { $("#sub-form-error").textContent = `Cannot substitute "${body.llm}" with itself.`; return; }
+  $("#sub-dlg-save").disabled = true;
+  try {
+    if (editingSub)
+      await api(`/api/substitutions/${encodeURIComponent(editingSub.llm)}`, {method: "PUT", body: JSON.stringify(body)});
+    else
+      await api("/api/substitutions", {method: "POST", body: JSON.stringify(body)});
+    subDlg.close();
+    toast(`Substitution for ${body.llm} ${editingSub ? "updated" : "added"}`);
+    loadSubstitutions();
+  } catch (err) { $("#sub-form-error").textContent = err.message; }
+  finally { $("#sub-dlg-save").disabled = false; }
+};
 
 // ------------------------------------------------------------------ refresh loop
 let busy = false, lastOk = Date.now(), tick = 0;
@@ -694,6 +829,7 @@ async function refresh(force = false) {
     else if (currentTab === "history") { if (force || ($("#f-auto").checked && tick % 5 === 0 && !H.open.size)) await loadHistory(); }
     else if (currentTab === "machines") { if (force || (tick % 3 === 0 && !dlg.open)) await loadMachines(); }
     else if (currentTab === "stats") { if (force || tick % 10 === 0) await loadStats(); }
+    else if (currentTab === "substitutions") { if (force || tick % 5 === 0) await loadSubstitutions(); }
     if (currentTab !== "live" && tick % 5 === 0) await loadOverview();
     lastOk = Date.now();
   } catch (e) { console.error(e); }
@@ -702,7 +838,7 @@ async function refresh(force = false) {
 }
 setInterval(() => { tick++; if (!document.hidden) refresh(); }, 1000);
 const initial = location.hash.slice(1);
-showTab(["live", "history", "machines", "stats"].includes(initial) ? initial : "live");
+showTab(["live", "history", "machines", "stats", "substitutions"].includes(initial) ? initial : "live");
 </script>
 </body>
 </html>

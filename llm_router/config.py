@@ -231,6 +231,7 @@ def parse_substitutions(raw_list: list) -> list[LlmSubstitutionConfig]:
     if dup:
         raise ValueError(f"Duplicate substitution(s): {', '.join(dup)}")
     
+    return substitutions
     
 
 def load_config(path: str | Path) -> Config:
@@ -262,9 +263,11 @@ def load_config(path: str | Path) -> Config:
     
     # substitutions
     sf = cfg.resolve(server.substitutions_file)
+    print("Loading subst :", sf)
     if sf is not None and sf.exists():
-        raw = yaml.safe_load(sf.read_text(encoding="utf-8")) or {}
-        cfg.substitutions = parse_substitutions(raw.get("substitutions") or [])
+        raw_subst = yaml.safe_load(sf.read_text(encoding="utf-8")) or {}
+        print(raw_subst)
+        cfg.substitutions = parse_substitutions(raw_subst) #.get("substitutions") or [])
     
     return cfg
 

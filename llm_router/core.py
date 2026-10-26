@@ -6,6 +6,7 @@ import logging
 import time
 from dataclasses import dataclass, field
 from typing import Optional
+import os
 
 import httpx
 
@@ -143,13 +144,19 @@ class RouterCore:
             log.info("Machine pool saved to %s", path)
         
         # Saves substitutions
-        if self.scheduler.substitutions is not None:
-            path_substitutions = self.config.resolve(self.config.server.substitutions_file)
+        path_substitutions = self.config.resolve(self.config.server.substitutions_file)
+        if self.config.substitutions:
             if path_substitutions is None:
                 log.warning("server.substitutions_file not defined: changes will not be persisted")
             else:
-                save_substitutions(path=path_substitutions, substitutions= [s.cfg for s in self.scheduler.substitutions])
+                save_substitutions(path=path_substitutions, substitutions= self.config.substitutions)
                 log.info("Substitutions saved to %s", path_substitutions)
+        else:
+            # No substitution ? remove the file
+            if path_substitutions:
+                os.remove(path_substitutions)
+            
+                        
 
     async def add_machine(self, raw: dict) -> dict:
         """Adds a machine, persists the pool, and runs an initial health check."""
@@ -187,7 +194,7 @@ class RouterCore:
         return self.scheduler.machine_info(machine)
 
     # --- Substitutions
-    def add_substitution(self, raw:dict) -> dict:
+    async def add_substitution(self, raw:dict) -> dict:
         sc = substitution_from_dict(raw=raw)
         if self.config.substitutions is None:
             self.config.substitutions = list[LlmSubstitutionConfig]()
@@ -195,14 +202,16 @@ class RouterCore:
         self._persist()
         return self.scheduler.substitution_info(sc)
     
-    def remove_substitution(self, llm: str) -> None:
+    async def remove_substitution(self, llm: str) -> None:
         #find sub
         if self.config.substitutions:
             for sub in self.config.substitutions:
                 if sub.llm == llm:
                     self.config.substitutions.remove(sub)
+                    self._persist()
                     break
-    def update_subscription(self, llm: str, raw: dict) -> dict:
+                
+    async def update_subscription(self, llm: str, raw: dict) -> dict:
         #find the sub
         current : Optional[LlmSubstitutionConfig] = None
         if self.config.substitutions:
