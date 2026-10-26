@@ -269,7 +269,9 @@ def create_api_app(core: RouterCore) -> FastAPI:
             rec.machine = lease.machine.name
             rec.queue_wait_ms += waited * 1000
             upstream = dict(body, model=lease.deployment.model.upstream_name)
-            ctx.headers = {"X-Router-Machine": lease.machine.name, "X-Router-Request-Id": rec.request_id,
+            ctx.headers = {"X-Router-Machine": lease.machine.name, 
+                           "X-Router-Request-Id": rec.request_id,
+                           "X-Request-Time": rec.request_time,
                            "X-Router-Queue-Wait-Ms": f"{rec.queue_wait_ms:.0f}"}
 
             # ---- 2. proxy
