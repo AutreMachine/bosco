@@ -13,7 +13,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Optional
 
-from .config import Config, MachineConfig, ModelConfig
+from .config import Config, MachineConfig, ModelConfig, LlmSubstitutionConfig
 
 log = logging.getLogger("llm_router.scheduler")
 
@@ -121,12 +121,19 @@ class Waiter:
 class Scheduler:
     def __init__(self, config: Config):
         """Loads machines from config and builds the initial deployment index."""
+        self.config = config
         self.server = config.server
         self.machines: dict[str, Machine] = {}
+        # self.substitutions : Optional[dict[str, LlmSubstitutionConfig]] = None
         self.deployments: dict[str, list[Deployment]] = {}
         self.queue: list[Waiter] = []
         for mc in config.machines:
             self.machines[mc.name] = Machine(mc)
+        # if config.substitutions:
+        #     self.substitutions = {}
+        #     for sc in config.substitutions:
+        #         self.substitutions[sc.llm] = sc
+        
         self._rebuild()
 
     # ------------------------------------------------- dynamic pool management
@@ -197,10 +204,39 @@ class Scheduler:
             self._fail_orphans()
         return machine
 
+    # --- Substitutions
+    # def add_substitution(self, sub: LlmSubstitutionConfig):
+    #     if self.substitutions and sub.llm in self.substitutions:
+    #         raise ValueError(f"Substitution {sub.llm} already exists")
+    # get model and manage substiotutions - if any
+    def get_deployments(self, model: str) -> Optional[list[Deployment]]:
+        deps = self.deployments.get(model)
+        if deps:
+            return deps
+        # Not found - check if substitutions
+        if self.config.substitutions is None:
+            return None #not found, no substitution
+        
+        ret : Optional[list[Deployment]] = None
+        for sub in self.config.substitutions:
+            if sub.llm == model:
+                # Found a possible LLM in substitutions - now get the deployments
+                for item in sub.substitutions:
+                    deps = self.deployments.get(item.name)
+                    if deps:
+                        if ret is None:
+                            ret = list[Deployment]()
+                        ret.extend(deps)
+        return ret
+                             
+
+                     
+        
+
     # ------------------------------------------------------------------ infos
     def model_type(self, model: str) -> Optional[str]:
         """Returns the model type ('llm' or 'embedding'), or None if the model is unknown."""
-        deps = self.deployments.get(model)
+        deps = self.get_deployments(model=model) # self.deployments.get(model)
         return deps[0].model.type if deps else None
 
     def effective_priority(self, w: Waiter, now: float) -> int:
@@ -213,7 +249,9 @@ class Scheduler:
     # -------------------------------------------------------------- sélection
     def _pick(self, model: str, exclude: frozenset[str]) -> Optional[Deployment]:
         """The most performant free machine (tie-break: least loaded)."""
-        candidates = [d for d in self.deployments.get(model, [])
+        # candidates = [d for d in self.deployments.get(model, [])
+        #               if d.machine.name not in exclude and d.has_free_slot()]        
+        candidates = [d for d in (self.get_deployments(model=model) or [])
                       if d.machine.name not in exclude and d.has_free_slot()]
         if not candidates:
             return None
@@ -248,8 +286,9 @@ class Scheduler:
     # ----------------------------------------------------------------- API
     def check_model(self, model: str, exclude: frozenset[str] = frozenset()) -> None:
         """Raises ModelNotFound or NoHealthyBackend if the model cannot be served."""
-        deps = self.deployments.get(model)
+        deps = self.get_deployments(model=model) # self.deployments.get(model)
         if not deps:
+            print("Error : model not found")
             raise ModelNotFound(model)
         if not any(d.machine.available and d.machine.name not in exclude for d in deps):
             raise NoHealthyBackend(model)
@@ -334,14 +373,23 @@ class Scheduler:
         """Returns a serializable dict describing a machine and its deployments."""
         deps = {d.model.name: d for ds in self.deployments.values() for d in ds if d.machine is m}
         return {
-            "name": m.name, "url": m.cfg.url, "enabled": m.cfg.enabled, "healthy": m.healthy,
-            "last_error": m.last_error, "last_check": m.last_check or None,
-            "performance": m.cfg.performance, "active": m.active, "max_concurrent": m.cfg.max_concurrent,
-            "supports_stream_options": m.cfg.supports_stream_options, "has_api_key": bool(m.cfg.api_key),
+            "name": m.name, 
+            "url": m.cfg.url, 
+            "enabled": m.cfg.enabled, 
+            "healthy": m.healthy,
+            "last_error": m.last_error, 
+            "last_check": m.last_check or None,
+            "performance": m.cfg.performance, 
+            "active": m.active, 
+            "max_concurrent": m.cfg.max_concurrent,
+            "supports_stream_options": m.cfg.supports_stream_options, 
+            "has_api_key": bool(m.cfg.api_key),
             "observed_prefill_tps": round(m.ema_prefill, 1) if m.ema_prefill else None,
             "observed_gen_tps": round(m.ema_gen, 1) if m.ema_gen else None,
             "models": [{
-                "name": mo.name, "type": mo.type, "backend_name": mo.backend_name,
+                "name": mo.name, 
+                "type": mo.type, 
+                "backend_name": mo.backend_name,
                 "max_concurrent": mo.max_concurrent,
                 "active": deps[mo.name].active if mo.name in deps else 0,
             } for mo in m.cfg.models],
@@ -353,8 +401,16 @@ class Scheduler:
         return {
             "machines": [self.machine_info(m) for m in self.machines.values()],
             "queue": [{
-                "tag": w.tag, "model": w.model, "priority": PRIORITY_NAMES[w.priority],
+                "tag": w.tag, 
+                "model": w.model, 
+                "priority": PRIORITY_NAMES[w.priority],
                 "effective_priority": PRIORITY_NAMES[self.effective_priority(w, now)],
                 "waiting_s": round(now - w.enqueued_at, 2),
             } for w in sorted(self.queue, key=lambda w: (self.effective_priority(w, now), w.seq))],
+        }
+        
+    def substitution_info(self, s: LlmSubstitutionConfig ) -> dict:
+        return {
+            "llm" : s.llm,
+            "substitutions": [{item.name for item in s.substitutions}]
         }

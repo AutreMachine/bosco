@@ -63,7 +63,15 @@ def create_admin_app(core: RouterCore) -> FastAPI:
         if name not in sched.machines:
             raise HTTPException(status_code=404, detail=f"Unknown machine: {name}")
         return sched.machines[name]
-
+    
+    def get_substitution(llm: str):
+        """Returns the named Machine or raises HTTP 404."""
+        llms = [x.llm for x in core.config.substitutions]
+        if llm not in llms:
+            raise HTTPException(status_code=404, detail=f"Unknown substitution: {llm}")
+        current = [x for x in core.config.substitutions if x.llm == llm]
+        return current[0]
+    
     @app.get("/", include_in_schema=False)
     async def index():
         """Serves the admin HTML page."""
@@ -161,6 +169,39 @@ def create_admin_app(core: RouterCore) -> FastAPI:
         await core.check_machine(m)
         return sched.machine_info(m)
 
+    # Substitutions
+    @app.get("/api/substitutions")
+    async def list_substitutions():
+        """Returns info for all substitutions in the pool."""
+        if core.config.substitutions:
+            return {"substitutions": [sched.substitution_info(m) for m in core.config.substitutions]}
+        else:
+            return {"substitutions": []}
+
+    @app.post("/api/substitutions", status_code=201)
+    async def add_substitution(payload: dict = Body(...)):
+        """Adds a new substitution to the pool."""
+        try:
+            return await core.add_substitution(payload)
+        except (ValueError, TypeError) as e:
+            bad_request(e)
+
+    @app.put("/api/substitutions/{llm}")
+    async def update_substitution(llm: str, payload: dict = Body(...)):
+        """Updates an existing substitution's configuration."""
+        get_substitution(llm)
+        try:
+            return await core.update_subscription(llm, payload)
+        except (ValueError, TypeError) as e:
+            bad_request(e)
+
+    @app.delete("/api/substitutions/{llm}")
+    async def delete_substitution(llm: str):
+        """Removes a substitution from the pool."""
+        get_substitution(llm)
+        await core.remove_substitution(llm)
+        return {"removed": llm} #, "running_requests_left_to_finish": running
+    
     @app.post("/api/probe")
     async def probe(payload: dict = Body(...)):
         """Tests a backend URL and lists its models (assists the add-machine form)."""
