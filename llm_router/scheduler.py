@@ -121,6 +121,7 @@ class Waiter:
 class Scheduler:
     def __init__(self, config: Config):
         """Loads machines from config and builds the initial deployment index."""
+        self.config = config
         self.server = config.server
         self.machines: dict[str, Machine] = {}
         # self.substitutions : Optional[dict[str, LlmSubstitutionConfig]] = None
@@ -207,12 +208,35 @@ class Scheduler:
     # def add_substitution(self, sub: LlmSubstitutionConfig):
     #     if self.substitutions and sub.llm in self.substitutions:
     #         raise ValueError(f"Substitution {sub.llm} already exists")
+    # get model and manage substiotutions - if any
+    def get_deployments(self, model: str) -> Optional[list[Deployment]]:
+        deps = self.deployments.get(model)
+        if deps:
+            return deps
+        # Not found - check if substitutions
+        if self.config.substitutions is None:
+            return None #not found, no substitution
+        
+        ret : Optional[list[Deployment]] = None
+        for sub in self.config.substitutions:
+            if sub.llm == model:
+                # Found a possible LLM in substitutions - now get the deployments
+                for item in sub.substitutions:
+                    deps = self.deployments.get(item.name)
+                    if deps:
+                        if ret is None:
+                            ret = list[Deployment]()
+                        ret.extend(deps)
+        return ret
+                             
+
+                     
         
 
     # ------------------------------------------------------------------ infos
     def model_type(self, model: str) -> Optional[str]:
         """Returns the model type ('llm' or 'embedding'), or None if the model is unknown."""
-        deps = self.deployments.get(model)
+        deps = self.get_deployments(model=model) # self.deployments.get(model)
         return deps[0].model.type if deps else None
 
     def effective_priority(self, w: Waiter, now: float) -> int:
@@ -225,7 +249,9 @@ class Scheduler:
     # -------------------------------------------------------------- sélection
     def _pick(self, model: str, exclude: frozenset[str]) -> Optional[Deployment]:
         """The most performant free machine (tie-break: least loaded)."""
-        candidates = [d for d in self.deployments.get(model, [])
+        # candidates = [d for d in self.deployments.get(model, [])
+        #               if d.machine.name not in exclude and d.has_free_slot()]        
+        candidates = [d for d in (self.get_deployments(model=model) or [])
                       if d.machine.name not in exclude and d.has_free_slot()]
         if not candidates:
             return None
@@ -260,8 +286,9 @@ class Scheduler:
     # ----------------------------------------------------------------- API
     def check_model(self, model: str, exclude: frozenset[str] = frozenset()) -> None:
         """Raises ModelNotFound or NoHealthyBackend if the model cannot be served."""
-        deps = self.deployments.get(model)
+        deps = self.get_deployments(model=model) # self.deployments.get(model)
         if not deps:
+            print("Error : model not found")
             raise ModelNotFound(model)
         if not any(d.machine.available and d.machine.name not in exclude for d in deps):
             raise NoHealthyBackend(model)
