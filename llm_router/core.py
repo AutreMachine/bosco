@@ -9,7 +9,14 @@ from typing import Optional
 
 import httpx
 
-from .config import Config, MachineConfig, machine_from_dict, save_machines
+from .config import (
+    Config, 
+    MachineConfig, 
+    machine_from_dict, 
+    save_machines,
+    LlmSubstitutionConfig,
+    substitution_from_dict,
+    save_substitutions)
 from .metrics import MetricsStore
 from .proxy import PerfMeter
 from .scheduler import Machine, Scheduler
@@ -130,9 +137,19 @@ class RouterCore:
         path = self.config.resolve(self.config.server.machines_file)
         if path is None:
             log.warning("server.machines_file not defined: change will not be persisted")
-            return
-        save_machines(path, [m.cfg for m in self.scheduler.machines.values()])
-        log.info("Machine pool saved to %s", path)
+            # return
+        else:
+            save_machines(path, [m.cfg for m in self.scheduler.machines.values()])
+            log.info("Machine pool saved to %s", path)
+        
+        # Saves substitutions
+        if self.scheduler.substitutions is not None:
+            path_substitutions = self.config.resolve(self.config.server.substitutions_file)
+            if path_substitutions is None:
+                log.warning("server.substitutions_file not defined: changes will not be persisted")
+            else:
+                save_substitutions(path=path_substitutions, substitutions= [s.cfg for s in self.scheduler.substitutions])
+                log.info("Substitutions saved to %s", path_substitutions)
 
     async def add_machine(self, raw: dict) -> dict:
         """Adds a machine, persists the pool, and runs an initial health check."""
@@ -169,6 +186,39 @@ class RouterCore:
             await self.check_machine(machine)
         return self.scheduler.machine_info(machine)
 
+    # --- Substitutions
+    def add_substitution(self, raw:dict) -> dict:
+        sc = substitution_from_dict(raw=raw)
+        if self.config.substitutions is None:
+            self.config.substitutions = list[LlmSubstitutionConfig]()
+        self.config.substitutions.append(sc)
+        self._persist()
+        return self.scheduler.substitution_info(sc)
+    
+    def remove_substitution(self, llm: str) -> None:
+        #find sub
+        if self.config.substitutions:
+            for sub in self.config.substitutions:
+                if sub.llm == llm:
+                    self.config.substitutions.remove(sub)
+                    break
+    def update_subscription(self, llm: str, raw: dict) -> dict:
+        #find the sub
+        current : Optional[LlmSubstitutionConfig] = None
+        if self.config.substitutions:
+            for sub in self.config.substitutions:
+                if sub.llm == llm:
+                    current = sub
+                    break
+        if current is None:
+            return {}
+        sc = substitution_from_dict(raw=raw)
+        current.substitutions = sc.substitutions
+        self._persist()
+        return self.scheduler.substitution_info(sc)
+        
+                    
+    
     # ------------------------------------------------------------- live tracking
     def active_snapshot(self) -> list[dict]:
         """Returns a sorted list of active request dicts with live performance metrics."""

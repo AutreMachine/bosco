@@ -13,7 +13,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Optional
 
-from .config import Config, MachineConfig, ModelConfig
+from .config import Config, MachineConfig, ModelConfig, LlmSubstitutionConfig
 
 log = logging.getLogger("llm_router.scheduler")
 
@@ -123,10 +123,16 @@ class Scheduler:
         """Loads machines from config and builds the initial deployment index."""
         self.server = config.server
         self.machines: dict[str, Machine] = {}
+        # self.substitutions : Optional[dict[str, LlmSubstitutionConfig]] = None
         self.deployments: dict[str, list[Deployment]] = {}
         self.queue: list[Waiter] = []
         for mc in config.machines:
             self.machines[mc.name] = Machine(mc)
+        # if config.substitutions:
+        #     self.substitutions = {}
+        #     for sc in config.substitutions:
+        #         self.substitutions[sc.llm] = sc
+        
         self._rebuild()
 
     # ------------------------------------------------- dynamic pool management
@@ -196,6 +202,12 @@ class Scheduler:
         else:
             self._fail_orphans()
         return machine
+
+    # --- Substitutions
+    # def add_substitution(self, sub: LlmSubstitutionConfig):
+    #     if self.substitutions and sub.llm in self.substitutions:
+    #         raise ValueError(f"Substitution {sub.llm} already exists")
+        
 
     # ------------------------------------------------------------------ infos
     def model_type(self, model: str) -> Optional[str]:
@@ -334,14 +346,23 @@ class Scheduler:
         """Returns a serializable dict describing a machine and its deployments."""
         deps = {d.model.name: d for ds in self.deployments.values() for d in ds if d.machine is m}
         return {
-            "name": m.name, "url": m.cfg.url, "enabled": m.cfg.enabled, "healthy": m.healthy,
-            "last_error": m.last_error, "last_check": m.last_check or None,
-            "performance": m.cfg.performance, "active": m.active, "max_concurrent": m.cfg.max_concurrent,
-            "supports_stream_options": m.cfg.supports_stream_options, "has_api_key": bool(m.cfg.api_key),
+            "name": m.name, 
+            "url": m.cfg.url, 
+            "enabled": m.cfg.enabled, 
+            "healthy": m.healthy,
+            "last_error": m.last_error, 
+            "last_check": m.last_check or None,
+            "performance": m.cfg.performance, 
+            "active": m.active, 
+            "max_concurrent": m.cfg.max_concurrent,
+            "supports_stream_options": m.cfg.supports_stream_options, 
+            "has_api_key": bool(m.cfg.api_key),
             "observed_prefill_tps": round(m.ema_prefill, 1) if m.ema_prefill else None,
             "observed_gen_tps": round(m.ema_gen, 1) if m.ema_gen else None,
             "models": [{
-                "name": mo.name, "type": mo.type, "backend_name": mo.backend_name,
+                "name": mo.name, 
+                "type": mo.type, 
+                "backend_name": mo.backend_name,
                 "max_concurrent": mo.max_concurrent,
                 "active": deps[mo.name].active if mo.name in deps else 0,
             } for mo in m.cfg.models],
@@ -353,8 +374,16 @@ class Scheduler:
         return {
             "machines": [self.machine_info(m) for m in self.machines.values()],
             "queue": [{
-                "tag": w.tag, "model": w.model, "priority": PRIORITY_NAMES[w.priority],
+                "tag": w.tag, 
+                "model": w.model, 
+                "priority": PRIORITY_NAMES[w.priority],
                 "effective_priority": PRIORITY_NAMES[self.effective_priority(w, now)],
                 "waiting_s": round(now - w.enqueued_at, 2),
             } for w in sorted(self.queue, key=lambda w: (self.effective_priority(w, now), w.seq))],
+        }
+        
+    def substitution_info(self, s: LlmSubstitutionConfig ) -> dict:
+        return {
+            "llm" : s.llm,
+            "substitutions": [{item.name for item in s.substitutions}]
         }
