@@ -25,6 +25,19 @@ class ModelConfig:
     def upstream_name(self) -> str:
         """Returns the backend model name, falling back to the public name."""
         return self.backend_name or self.name
+    
+
+@dataclass
+class LlmSubstitutionConfig:
+    """Class to allow a model to be substituted with other models in case the llm is not available
+    """
+    llm: str
+    substitutions: list[ModelConfig] = field(default_factory=list)
+    
+    def to_dict(self) -> dict:
+        d = asdict(self)
+        d["substitutions"] = [{k: v for k, v in m.items() if v is not None} for m in d["substitutions"]]
+        return {k: v for k, v in d.items() if v is not None}
 
 
 @dataclass
@@ -73,6 +86,7 @@ class ServerConfig:
     db_path: str = "/data/router_metrics.db"
     log_file: Optional[str] = "/data/router_requests.jsonl"
     machines_file: Optional[str] = "/data/machines.yaml"  # pool modified from the console (takes precedence at startup)
+    substitutions_file: Optional[str] = "/data/substitutions.yaml" # to mark llm substitutions
 
     def parsed_keys(self) -> list[ApiKey]:
         """Parses api_keys config and the LLM_ROUTER_API_KEYS env var into validated ApiKey objects."""
@@ -109,6 +123,7 @@ class AdminConfig:
 class Config:
     server: ServerConfig
     machines: list[MachineConfig]
+    substitutions: Optional[list[LlmSubstitutionConfig]] = None
     admin: AdminConfig = field(default_factory=AdminConfig)
     path: Optional[Path] = None
 
@@ -138,6 +153,28 @@ def model_from_dict(raw: dict | str) -> ModelConfig:
             raise ValueError(f"Model {m.name}: max_concurrent must be >= 1")
     return m
 
+def substitution_from_dict(raw: dict) -> LlmSubstitutionConfig:
+    """Parses a dict into LLMSubstitution
+
+    Args:
+        raw (dict): _description_
+
+    Returns:
+        LlmSubstitutionConfig: _description_
+    """
+    raw = dict(raw)
+    models_raw = raw.pop("substitutions",None) or []
+    known = set(LlmSubstitutionConfig.__dataclass_fields__)
+    unknown = set(raw) - known
+    if unknown:
+        raise ValueError(f"Unknown fiels: {', '.join(sorted(unknown))}")
+    lc = LlmSubstitutionConfig(**raw, substitutions=[model_from_dict(m) for m in models_raw])
+    if not NAME_RE.match(lc.llm or ""):
+        raise ValueError(f"Invalid LLM name: '{lc.llm}'")
+    names = [m.name for m in lc.substitutions]
+    if len(names) != len(set(names)):
+        raise ValueError("Substitution declared twice")
+    return lc
 
 def machine_from_dict(raw: dict) -> MachineConfig:
     """Parses and validates a raw dict into a MachineConfig, raising ValueError on bad input."""
@@ -187,6 +224,15 @@ def parse_machines(raw_list: list) -> list[MachineConfig]:
     check_model_types(machines)
     return machines
 
+def parse_substitutions(raw_list: list) -> list[LlmSubstitutionConfig]:
+    substitutions = [substitution_from_dict(r) for r in raw_list or []]
+    llms = [m.llm for m in substitutions]
+    dup = {n for n in llms if llms.count(n)>1}
+    if dup:
+        raise ValueError(f"Duplicate substitution(s): {', '.join(dup)}")
+    
+    return substitutions
+    
 
 def load_config(path: str | Path) -> Config:
     """Loads and validates a YAML config file, merging the machines file if present."""
@@ -214,6 +260,15 @@ def load_config(path: str | Path) -> Config:
         cfg.machines = parse_machines(raw.get("machines") or [])
     else:
         cfg.machines = parse_machines(data.get("machines") or [])
+    
+    # substitutions
+    sf = cfg.resolve(server.substitutions_file)
+    print("Loading subst :", sf)
+    if sf is not None and sf.exists():
+        raw_subst = yaml.safe_load(sf.read_text(encoding="utf-8")) or {}
+        print(raw_subst)
+        cfg.substitutions = parse_substitutions(raw_subst) #.get("substitutions") or [])
+    
     return cfg
 
 
@@ -223,5 +278,15 @@ def save_machines(path: Path, machines: list[MachineConfig]) -> None:
     header = ("# Machine pool managed by the router admin console.\n"
               "# This file takes precedence over the 'machines' section of config.yaml.\n")
     tmp.write_text(header + yaml.safe_dump({"machines": [m.to_dict() for m in machines]},
-                                           allow_unicode=True, sort_keys=False), encoding="utf-8")
+                                           allow_unicode=True, 
+                                           sort_keys=False), encoding="utf-8")
+    os.replace(tmp, path)
+
+def save_substitutions(path: Path, substitutions: list [LlmSubstitutionConfig]) -> None:
+    """ Saving substitutions config"""
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    header = ("# Substitutions pool managed by the router admin console")
+    tmp.write_text(header + yaml.safe_dump({"substitutions": [s.to_dict() for s in substitutions]},
+                                           allow_unicode=True,
+                                           sort_keys=False), encoding="utf-8")
     os.replace(tmp, path)

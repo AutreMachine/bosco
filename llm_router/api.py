@@ -97,6 +97,7 @@ class ApiKeyMiddleware:
         name = self._match(token) if token else None
         if name is None:
             self.failures.setdefault(ip, []).append(time.monotonic())
+            # print("Found token :", token)
             log.warning("API key rejected from %s on %s", ip, scope["path"])
             return await oai_error(401, "Missing or invalid API key", "invalid_request_error",
                                    "invalid_api_key")(scope, receive, send)
@@ -206,10 +207,14 @@ def create_api_app(core: RouterCore) -> FastAPI:
 
         mtype = sched.model_type(model)
         if mtype is None:
-            return oai_error(404, f"Model '{model}' is not available on any machine",
+            msg = f"Model '{model}' is not available on any machine"
+            log.error(msg)
+            return oai_error(404, msg ,
                              "invalid_request_error", "model_not_found")
         if mtype != ENDPOINT_KIND[path]:
-            return oai_error(400, f"Model '{model}' is of type '{mtype}', incompatible with /v1/{path}",
+            msg = f"Model '{model}' is of type '{mtype}', incompatible with /v1/{path}"
+            log.error(msg)
+            return oai_error(400, msg,
                              "invalid_request_error")
 
         client_stream = bool(body.get("stream")) and path != "embeddings"
@@ -269,7 +274,9 @@ def create_api_app(core: RouterCore) -> FastAPI:
             rec.machine = lease.machine.name
             rec.queue_wait_ms += waited * 1000
             upstream = dict(body, model=lease.deployment.model.upstream_name)
-            ctx.headers = {"X-Router-Machine": lease.machine.name, "X-Router-Request-Id": rec.request_id,
+            ctx.headers = {"X-Router-Machine": lease.machine.name, 
+                           "X-Router-Request-Id": rec.request_id,
+                           "X-Request-Time": str(rec.request_time),
                            "X-Router-Queue-Wait-Ms": f"{rec.queue_wait_ms:.0f}"}
 
             # ---- 2. proxy
