@@ -353,6 +353,7 @@ dialog::backdrop { background: rgba(10,14,20,.45); }
       <label class="field">
         <span>LLM name <span class="muted">(the model name clients will request)</span></span>
         <input name="llm" required placeholder="gpt-4" autocomplete="off">
+        <input type="hidden" name="sub_id" id="sub_id" value="0" />
       </label>
       <div class="field">
         <span>Substitute models <span class="muted">(tried in order when the LLM is unavailable)</span></span>
@@ -715,7 +716,7 @@ async function loadSubstitutions() {
       const name = typeof x === "string" ? x : (x.name ?? "");
       return name ? `<span class="chip">${esc(name)}</span>` : "";
     }).join("") || '<span class="muted">No substitutes configured</span>';
-    return `<div class="card" data-llm="${esc(s.llm)}">
+    return `<div class="card" data-llm="${esc(s.llm)}" data-sub_id="${s.sub_id}">
       <div class="head"><span class="name">${esc(s.llm)}</span></div>
       <div class="chips">${chips}</div>
       <div class="actions">
@@ -728,13 +729,14 @@ async function loadSubstitutions() {
 }
 $("#sub-cards").onclick = async e => {
   const b = e.target.closest("button[data-act]"); if (!b) return;
+  const sub_id = b.closest(".card").dataset.sub_id;
   const llm = b.closest(".card").dataset.llm, act = b.dataset.act;
   const enc = encodeURIComponent(llm);
   try {
     if (act === "edit") return openSubDialog(substitutions.find(s => s.llm === llm));
     if (act === "delete") {
       if (!confirm(`Remove substitution for "${llm}"?`)) return;
-      await api(`/api/substitutions/${enc}`, {method: "DELETE"});
+      await api(`/api/substitutions/${sub_id}`, {method: "DELETE"});
       toast(`Substitution for ${llm} removed`);
     }
   } catch (err) { toast(err.message, true); }
@@ -773,6 +775,9 @@ function subModelRow(m = {}) {
 async function openSubDialog(s = null) {
   editingSub = s; subForm.reset(); $("#sub-models-rows").innerHTML = ""; $("#sub-form-error").textContent = "";
   $("#sub-dlg-title").textContent = s ? `Edit "${s.llm}"` : "Add a substitution";
+  if (s) {
+    $("#sub_id").value = s.sub_id;
+  }
   subForm.llm.readOnly = false;
   if (!machines.length) machines = (await api("/api/machines")).machines;
   subAvailableModels = getAvailableModels();
@@ -801,15 +806,18 @@ subForm.onsubmit = async e => {
     const type = sel.selectedOptions[0]?.dataset.type ?? "llm";
     return {name: sel.value, type};
   }).filter(m => m.name);
-  const body = {llm: subForm.llm.value.trim(), substitutions: models};
+  const body = {sub_id: subForm.sub_id.value, llm: subForm.llm.value.trim(), substitutions: models};
   if (!body.llm) { $("#sub-form-error").textContent = "LLM name is required."; return; }
   if (!models.length) { $("#sub-form-error").textContent = "At least one substitute model is required."; return; }
   if (substitutions.some(s => s.llm === body.llm && s.llm !== editingSub?.llm)) { $("#sub-form-error").textContent = `A substitution for "${body.llm}" already exists.`; return; }
   if (models.some(m => m.name === body.llm)) { $("#sub-form-error").textContent = `Cannot substitute "${body.llm}" with itself.`; return; }
   $("#sub-dlg-save").disabled = true;
   try {
-    if (editingSub)
-      await api(`/api/substitutions/${encodeURIComponent(editingSub.llm)}`, {method: "PUT", body: JSON.stringify(body)});
+    if (editingSub) {
+      // Get sub_id
+      if (!body.sub_id) { $("#sub-form-error").textContent = "Substitution Id is required."; return; }
+      await api(`/api/substitutions/${body.sub_id}/${encodeURIComponent(body.llm)}`, {method: "PUT", body: JSON.stringify(body)});
+    }
     else
       await api("/api/substitutions", {method: "POST", body: JSON.stringify(body)});
     subDlg.close();
