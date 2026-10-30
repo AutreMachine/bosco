@@ -717,7 +717,7 @@ async function loadSubstitutions() {
       return name ? `<span class="chip">${esc(name)}</span>` : "";
     }).join("") || '<span class="muted">No substitutes configured</span>';
     return `<div class="card" data-llm="${esc(s.llm)}" data-sub_id="${s.sub_id}">
-      <div class="head"><span class="name">${esc(s.llm)}</span></div>
+      <div class="head"><span class="name">${esc(s.llm)}</span><small><i>will be transformed in...</i></small></div>
       <div class="chips">${chips}</div>
       <div class="actions">
         <button class="btn sm" data-act="edit">Edit</button>
