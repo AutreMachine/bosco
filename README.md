@@ -15,6 +15,10 @@ The idea : Grow your LLM farm and just call one endpoint.
 <img width="1405" height="517" alt="image" src="https://github.com/user-attachments/assets/8f7c30db-7ca5-4024-b5b2-043cb86dffe9" />
 
 # Updates
+**2026/10/30** : Fixed LLM Substitution.
+
+Only the list of LLMs to substitute was editable ; now the name is also updatable.
+
 **2026/10/27** : Added **LLM Substitutions**.
 Now you can associate 1 or more active LLMs of your farm to a specific LLM name. 
 Let's say you're sending a query for deepseek-r1:27b, but no machine is available in your LLM farm. There is an available machine with deepseek-r1:14b installed. With LLM Substitutions, you can add a bridge between 14b and 27b ; this way, the 14b machine will process the query and give the answer, instead of waiting for the 27b. 
