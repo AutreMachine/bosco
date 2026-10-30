@@ -12,7 +12,7 @@ import httpx
 
 from .config import (
     Config, 
-    MachineConfig, 
+    # MachineConfig, 
     machine_from_dict, 
     save_machines,
     LlmSubstitutionConfig,
@@ -149,11 +149,12 @@ class RouterCore:
             if path_substitutions is None:
                 log.warning("server.substitutions_file not defined: changes will not be persisted")
             else:
+                
                 save_substitutions(path=path_substitutions, substitutions= self.config.substitutions)
                 log.info("Substitutions saved to %s", path_substitutions)
         else:
             # No substitution ? remove the file
-            if path_substitutions:
+            if path_substitutions and os.path.exists(path_substitutions):
                 os.remove(path_substitutions)
             
                         
@@ -198,31 +199,35 @@ class RouterCore:
         sc = substitution_from_dict(raw=raw)
         if self.config.substitutions is None:
             self.config.substitutions = list[LlmSubstitutionConfig]()
+        # compute id
+        sc.sub_id = len(self.config.substitutions)
         self.config.substitutions.append(sc)
         self._persist()
         return self.scheduler.substitution_info(sc)
     
-    async def remove_substitution(self, llm: str) -> None:
+    async def remove_substitution(self, sub_id : int) -> None:
         #find sub
         if self.config.substitutions:
             for sub in self.config.substitutions:
-                if sub.llm == llm:
+                if sub.sub_id == sub_id:
                     self.config.substitutions.remove(sub)
                     self._persist()
                     break
                 
-    async def update_subscription(self, llm: str, raw: dict) -> dict:
+    async def update_substitution(self, sub_id: int, llm: str, raw: dict) -> dict:
         #find the sub
         current : Optional[LlmSubstitutionConfig] = None
         if self.config.substitutions:
             for sub in self.config.substitutions:
-                if sub.llm == llm:
+                if sub.sub_id == sub_id:
                     current = sub
                     break
         if current is None:
             return {}
         sc = substitution_from_dict(raw=raw)
         current.substitutions = sc.substitutions
+        current.llm = llm
+        print("updated ",current)
         self._persist()
         return self.scheduler.substitution_info(sc)
         

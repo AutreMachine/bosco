@@ -411,6 +411,7 @@ class Scheduler:
         
     def substitution_info(self, s: LlmSubstitutionConfig ) -> dict:
         return {
+            "sub_id": s.sub_id,
             "llm" : s.llm,
             "substitutions": [{item.name for item in s.substitutions}]
         }

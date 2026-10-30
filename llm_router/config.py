@@ -31,6 +31,7 @@ class ModelConfig:
 class LlmSubstitutionConfig:
     """Class to allow a model to be substituted with other models in case the llm is not available
     """
+    sub_id: int
     llm: str
     substitutions: list[ModelConfig] = field(default_factory=list)
     
@@ -38,6 +39,9 @@ class LlmSubstitutionConfig:
         d = asdict(self)
         d["substitutions"] = [{k: v for k, v in m.items() if v is not None} for m in d["substitutions"]]
         return {k: v for k, v in d.items() if v is not None}
+    
+    def __repr__(self) -> str:
+        return f"sub_id={self.sub_id} - llm={self.llm} - substitutions={self.substitutions}"
 
 
 @dataclass
@@ -164,13 +168,18 @@ def substitution_from_dict(raw: dict) -> LlmSubstitutionConfig:
     """
     raw = dict(raw)
     models_raw = raw.pop("substitutions",None) or []
+    sub_id=0
+    if "sub_id" in raw:
+        sub_id = int(raw["sub_id"])
+    
     known = set(LlmSubstitutionConfig.__dataclass_fields__)
     unknown = set(raw) - known
     if unknown:
         raise ValueError(f"Unknown fiels: {', '.join(sorted(unknown))}")
-    lc = LlmSubstitutionConfig(**raw, substitutions=[model_from_dict(m) for m in models_raw])
+    lc = LlmSubstitutionConfig(sub_id=sub_id, llm=raw["llm"], substitutions=[model_from_dict(m) for m in models_raw])
     if not NAME_RE.match(lc.llm or ""):
         raise ValueError(f"Invalid LLM name: '{lc.llm}'")
+    print("Adding substitution for ", lc.llm)
     names = [m.name for m in lc.substitutions]
     if len(names) != len(set(names)):
         raise ValueError("Substitution declared twice")

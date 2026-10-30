@@ -64,12 +64,12 @@ def create_admin_app(core: RouterCore) -> FastAPI:
             raise HTTPException(status_code=404, detail=f"Unknown machine: {name}")
         return sched.machines[name]
     
-    def get_substitution(llm: str):
-        """Returns the named Machine or raises HTTP 404."""
-        llms = [x.llm for x in core.config.substitutions]
-        if llm not in llms:
+    def get_substitution(sub_id: int):
+        """Returns the named Sub or raises HTTP 404."""
+        sub_ids = [x.sub_id for x in core.config.substitutions]
+        if sub_id not in sub_ids:
             raise HTTPException(status_code=404, detail=f"Unknown substitution: {llm}")
-        current = [x for x in core.config.substitutions if x.llm == llm]
+        current = [x for x in core.config.substitutions if x.sub_id == sub_id]
         return current[0]
     
     @app.get("/", include_in_schema=False)
@@ -186,21 +186,22 @@ def create_admin_app(core: RouterCore) -> FastAPI:
         except (ValueError, TypeError) as e:
             bad_request(e)
 
-    @app.put("/api/substitutions/{llm}")
-    async def update_substitution(llm: str, payload: dict = Body(...)):
+    @app.put("/api/substitutions/{sub_id}/{llm}")
+    async def update_substitution(sub_id: int, llm: str, payload: dict = Body(...)):
         """Updates an existing substitution's configuration."""
-        get_substitution(llm)
+        get_substitution(sub_id)
         try:
-            return await core.update_subscription(llm, payload)
+            print("new llm : ",llm)
+            return await core.update_substitution(sub_id, llm, payload)
         except (ValueError, TypeError) as e:
             bad_request(e)
 
-    @app.delete("/api/substitutions/{llm}")
-    async def delete_substitution(llm: str):
+    @app.delete("/api/substitutions/{sub_id}")
+    async def delete_substitution(sub_id: str):
         """Removes a substitution from the pool."""
-        get_substitution(llm)
-        await core.remove_substitution(llm)
-        return {"removed": llm} #, "running_requests_left_to_finish": running
+        get_substitution(int(sub_id))
+        await core.remove_substitution(sub_id=int(sub_id))
+        return {"removed": sub_id} #, "running_requests_left_to_finish": running
     
     @app.post("/api/probe")
     async def probe(payload: dict = Body(...)):
