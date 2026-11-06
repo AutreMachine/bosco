@@ -15,6 +15,10 @@ The idea : Grow your LLM farm and just call one endpoint.
 <img width="1405" height="517" alt="image" src="https://github.com/user-attachments/assets/8f7c30db-7ca5-4024-b5b2-043cb86dffe9" />
 
 # Updates
+**2026/11/06** : Changed app name and icon.
+
+Yep. Not much, but much better :)
+
 **2026/10/30** : Fixed LLM Substitution.
 
 Only the list of LLMs to substitute was editable ; now the name is also updatable.
