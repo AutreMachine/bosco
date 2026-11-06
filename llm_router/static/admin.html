@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>LLM Router · Console</title>
+<title>Bosco · Console</title>
 <style>
 :root {
   --bg: #f6f7f9; --panel: #ffffff; --panel-2: #f0f2f5; --border: #e2e5ea; --text: #161a20; --muted: #677080;
@@ -171,8 +171,16 @@ dialog::backdrop { background: rgba(10,14,20,.45); }
 <header>
   <div class="bar">
     <div class="brand">
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="5" cy="12" r="2.5"/><circle cx="19" cy="5" r="2.5"/><circle cx="19" cy="12" r="2.5"/><circle cx="19" cy="19" r="2.5"/><path d="M7.5 12h9M7 10.5 16.8 6.2M7 13.5l9.8 4.3"/></svg>
-      <span>LLM Router</span>
+      <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 512 512">
+        <rect x="0" y="0" width="512" height="512" rx="96" fill="#10213A"/>
+        <path d="M112 196 C112 334 194 404 256 404 C318 404 400 334 400 196" fill="none" stroke="#E0A84A" stroke-width="48" stroke-linecap="round"/>
+        <line x1="256" y1="330" x2="170" y2="170" stroke="#F2EFE8" stroke-width="40" stroke-linecap="round"/>
+        <line x1="256" y1="330" x2="342" y2="170" stroke="#F2EFE8" stroke-width="40" stroke-linecap="round"/>
+        <circle cx="170" cy="170" r="48" fill="#F2EFE8"/>
+        <circle cx="342" cy="170" r="48" fill="#F2EFE8"/>
+        <rect x="196" y="300" width="120" height="64" rx="14" fill="#E0A84A"/>
+      </svg>
+      <span>Bosco</span>
     </div>
     <nav id="tabs">
       <button data-tab="live" class="active">Live<span class="count" id="cnt-live">0</span></button>
