@@ -14,6 +14,7 @@ from .core import RouterCore
 
 log = logging.getLogger("llm_router.admin")
 STATIC = Path(__file__).parent / "static"
+ICON_CACHE = {"Cache-Control": "public, max-age=86400"}
 
 
 class LanOnlyMiddleware:
@@ -76,6 +77,18 @@ def create_admin_app(core: RouterCore) -> FastAPI:
     async def index():
         """Serves the admin HTML page."""
         return FileResponse(STATIC / "admin.html", headers={"Cache-Control": "no-cache"})
+
+    @app.get("/favicon.svg", include_in_schema=False)
+    async def favicon_svg():
+        return FileResponse(STATIC / "favicon.svg", media_type="image/svg+xml", headers=ICON_CACHE)
+
+    @app.get("/favicon.ico", include_in_schema=False)
+    async def favicon_ico():
+        return FileResponse(STATIC / "favicon.ico", media_type="image/x-icon", headers=ICON_CACHE)
+
+    @app.get("/apple-touch-icon.png", include_in_schema=False)
+    async def apple_touch_icon():
+        return FileResponse(STATIC / "apple-touch-icon.png", media_type="image/png", headers=ICON_CACHE)
 
     # ------------------------------------------------------------- live
     @app.get("/api/overview")

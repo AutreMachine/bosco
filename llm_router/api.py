@@ -23,7 +23,7 @@ from .scheduler import (PRIORITY_NAMES, Lease, Machine, ModelNotFound, NoHealthy
 log = logging.getLogger("llm_router.api")
 
 ENDPOINT_KIND = {"chat/completions": "llm", "completions": "llm", "embeddings": "embedding", "systemone":"llm"}
-
+PUBLIC_PATHS = {"/health", "/favicon.ico"}
 
 def _parse_request_time(value: Optional[str]) -> float:
     """Parses X-Request-Time as a UTC Unix timestamp; falls back to now.
@@ -42,7 +42,7 @@ def _parse_request_time(value: Optional[str]) -> float:
         except ValueError:
             pass
     return time.time()
-PUBLIC_PATHS = {"/health"}
+
 
 
 def oai_error(status: int, message: str, type_: str, code: Optional[str] = None, headers=None) -> JSONResponse:
